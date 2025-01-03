@@ -45,11 +45,14 @@
     };
   };
 
-  # TODO: Set your username
   home = {
-    username = "your-username";
-    homeDirectory = "/home/your-username";
+    username = "paulg";
+    homeDirectory = "/home/paulg";
   };
+
+  # Enable automatic login for the user.
+  services.xserver.displayManager.autoLogin.enable = true;
+  services.xserver.displayManager.autoLogin.user = "paulg";
 
   # Add stuff for your user as you see fit:
   # programs.neovim.enable = true;
