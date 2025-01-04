@@ -1,0 +1,4 @@
+# Setting to allow mdns pings on wsl shell
+[wsl2]
+dnsTunneling=false
+
