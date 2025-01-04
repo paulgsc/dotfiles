@@ -52,7 +52,57 @@
 
   # Add stuff for your user as you see fit:
   # programs.neovim.enable = true;
-  # home.packages = with pkgs; [ steam ];
+  home.packages = with pkgs; [
+  
+      # Networking Tools
+      # curl
+      caddy
+
+      # Shell Enahancements
+      fzf
+      vim-custom
+      tmux
+      ripgrep
+
+      # nix tools
+      # nix-update
+      # nixpkgs-review
+      # nix-serve
+      # nixpkgs-fmt
+      # nixfmt-rfc-style
+      # nix-output-monitor
+      # cmtr
+
+      # Rust tools
+      cargo
+      rustc
+      rust-analyzer
+      rustfmt
+      clippy
+      # bandwhich
+      # procs
+      # sd
+      # bat
+      # eza
+      # fd
+      # gpg-tui
+      # genpass
+      # hyperfine
+
+      # Node
+      nodejs
+      nodePackages.pnpm
+      nodePackages
+
+      # Docker
+      docker
+      docker-compose
+
+      # DB
+      sqlite
+
+      
+  ];
 
   # Enable home-manager and git
   programs.home-manager.enable = true;

@@ -10,14 +10,14 @@
     # Also see the 'unstable-packages' overlay at 'overlays/default.nix'.
 
     # Home manager
-    # home-manager.url = "github:nix-community/home-manager/release-23.11";
-    # home-manager.inputs.nixpkgs.follows = "nixpkgs";
+    home-manager.url = "github:nix-community/home-manager/release-24.11";
+    home-manager.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = {
     self,
     nixpkgs,
-    # home-manager,
+    home-manager,
     ...
   } @ inputs: let
     inherit (self) outputs;
@@ -64,15 +64,15 @@
 
     # Standalone home-manager configuration entrypoint
     # Available through 'home-manager --flake .#your-username@your-hostname'
-    # homeConfigurations = {
-    #   "paulg@nixos" = home-manager.lib.homeManagerConfiguration {
-    #     pkgs = nixpkgs.legacyPackages.x86_64-linux; # Home-manager requires 'pkgs' instance
-    #     extraSpecialArgs = {inherit inputs outputs;};
-    #     modules = [
-    #       # > Our main home-manager configuration file <
-    #       ./home-manager/home.nix
-    #     ];
-    #   };
-    # };
+    homeConfigurations = {
+      "paulg@nixos" = home-manager.lib.homeManagerConfiguration {
+        pkgs = nixpkgs.legacyPackages.x86_64-linux; # Home-manager requires 'pkgs' instance
+        extraSpecialArgs = {inherit inputs outputs;};
+        modules = [
+          # > Our main home-manager configuration file <
+          ./home-manager/home.nix
+        ];
+      };
+    };
   };
 }

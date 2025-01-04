@@ -115,22 +115,12 @@
   # List packages installed in system profile. To search, run:
   # $ nix search wget
   environment.systemPackages = with pkgs; [
-    vim-custom # Do not forget to add an editor to edit configuration.nix! The Nano editor is also installed by default.
+    vim # Do not forget to add an editor to edit configuration.nix! The Nano editor is also installed by default.
     wget
     git
-    docker
-    docker-compose
     bash
-    rustup
     gcc
     gnumake
-    nodejs
-    nodePackages.pnpm
-    nodePackages.prettier
-    ripgrep
-    sql-formatter
-    rustfmt
-
   ];
 
   # Some programs need SUID wrappers, can be configured further or are
@@ -151,6 +141,15 @@
   # networking.firewall.allowedUDPPorts = [ ... ];
   # Or disable the firewall altogether.
   networking.firewall.enable = true;
+
+  # Enable mDNS
+  services.avahi = {
+    enable = true;
+    # nssmdns = true;
+    # publish.enable = true;
+    # publish.addresses = true;
+    # publish.workstation = true;
+  };
 
   # This value determines the NixOS release from which the default
   # settings for stateful data, like file locations and database versions
