@@ -15,6 +15,7 @@ let
     set hlsearch
     set smartcase
     set cursorline
+    syntax on
     "set signcolumn=yes
     
     " Color scheme
