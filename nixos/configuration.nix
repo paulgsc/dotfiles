@@ -143,7 +143,6 @@
       PasswordAuthentication = false;
       PermitRootLogin = "no";
       KbdInteractiveAuthentication = false;
-      AuthorizedKeysFiles = ".ssh/authorized_keys";
     };
   };
 
