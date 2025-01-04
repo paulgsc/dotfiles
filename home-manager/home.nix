@@ -55,7 +55,7 @@
   home.packages = with pkgs; [
   
       # Networking Tools
-      # curl
+      curl
       caddy
 
       # Shell Enahancements
@@ -92,7 +92,7 @@
       # Node
       nodejs
       nodePackages.pnpm
-      nodePackages
+      nodePackages.prettier
 
       # Docker
       docker
