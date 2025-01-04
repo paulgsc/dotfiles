@@ -94,7 +94,7 @@
     description = "Paul Gathondu";
     extraGroups = [ "networkmanager" "wheel" "docker" ];
     openssh.authorizedKeys.keys = [
-      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMJI8w7UZiLQLavfBW2SAmCPzTc817tgedFhLeakGue"
+      "ssh-ed25519 AC3NzaC1lZDI1NTE5AAAAIOMJI8w7UZiLQLavfBW2SAmCPzTc817tgedFhLeakGue"
     ];
     packages = with pkgs; [
     #  thunderbird
