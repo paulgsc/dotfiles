@@ -74,13 +74,8 @@
       # cmtr
 
       # Rust tools
-      cargo
-      rustc
-      rust-analyzer
-      rustfmt
-      clippy
-      # bandwhich
-      # procs
+      bandwhich
+      procs
       # sd
       # bat
       # eza
