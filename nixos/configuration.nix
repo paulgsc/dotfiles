@@ -8,6 +8,7 @@
   imports =
     [ # Include the results of the hardware scan.
       ./hardware-configuration.nix
+      ./filesystems.nix
     ];
 
 
@@ -92,7 +93,7 @@
   users.users.paulg = {
     isNormalUser = true;
     description = "Paul Gathondu";
-    extraGroups = [ "networkmanager" "wheel" "docker" ];
+    extraGroups = [ "networkmanager" "wheel" "docker" "sshfs" ];
     openssh.authorizedKeys.keys = [
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMJI8w7UZiLQLavfBW2SAmCPzTc817tgedFhLeakGue"
     ];
