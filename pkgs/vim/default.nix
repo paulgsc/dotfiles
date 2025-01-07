@@ -28,8 +28,8 @@ let
     let g:ale_fix_on_save = 1
     let g:ale_linters = {
       \    'rust': ['analyzer', 'cargo', 'clippy'],
-      \    'typescript': ['tserver', 'eslint', 'tsc'],
-      \    'typescriptreact': ['tserver', 'eslint', 'tsc'],
+      \    'typescript': ['tsserver', 'eslint', 'tsc'],
+      \    'typescriptreact': ['tsserver', 'eslint', 'tsc'],
       \    'javascript': ['eslint'],
       \    'json': ['eslint']
       \}
