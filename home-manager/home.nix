@@ -15,7 +15,6 @@
 
     # Or modules exported from other flakes (such as nix-colors):
     # inputs.nix-colors.homeManagerModules.default
-
     ./shell/tmux
   ];
 
@@ -60,7 +59,7 @@
       # Shell Enahancements
       fzf
       vim-custom
-      tmux
+      # tmux
       ripgrep
 
       # nix tools
