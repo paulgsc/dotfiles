@@ -37,7 +37,7 @@ let
       \     'rust': ['rustfmt'],
       \     'typescript': ['eslint', 'prettier'],
       \     'typescriptreact': ['eslint', 'prettier'],
-      \     'json': ['prettier']
+      \     'json': ['prettier'],
       \     'css': ['prettier']
       \}
     let g:ale_rust_cargo_use_clippy = 1
