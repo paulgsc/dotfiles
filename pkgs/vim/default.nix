@@ -38,6 +38,7 @@ let
       \     'typescript': ['eslint', 'prettier'],
       \     'typescriptreact': ['eslint', 'prettier'],
       \     'json': ['prettier']
+      \     'css': ['prettier']
       \}
     let g:ale_rust_cargo_use_clippy = 1
     let g:ale_virtualtext_cursor = 1
