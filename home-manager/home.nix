@@ -83,7 +83,7 @@
       # hyperfine
 
       # Node
-      nodejs_22
+      nodejs_23
       nodePackages.pnpm
       nodePackages.prettier
 
