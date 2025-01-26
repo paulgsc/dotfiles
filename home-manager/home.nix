@@ -93,7 +93,7 @@
 
       # DB
       sqlite
-
+      nodePackages.sql-formatter
       
   ];
 
