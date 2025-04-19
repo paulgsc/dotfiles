@@ -42,6 +42,7 @@ let
       \}
     let g:ale_rust_cargo_use_clippy = 1
     let g:ale_virtualtext_cursor = 1
+    let g:ale_set_highlights = 0
     
     " Status line configuration
     set laststatus=2
