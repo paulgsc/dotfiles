@@ -31,14 +31,17 @@ let
       \    'typescript': ['tsserver', 'eslint', 'tsc'],
       \    'typescriptreact': ['tsserver', 'eslint', 'tsc'],
       \    'javascript': ['eslint'],
-      \    'json': ['eslint']
+      \    'json': ['eslint'],
+      \    'jsonnet': ['jsonnet']
       \}
     let g:ale_fixers = {
       \     'rust': ['rustfmt'],
       \     'typescript': ['eslint', 'prettier'],
       \     'typescriptreact': ['eslint', 'prettier'],
       \     'json': ['prettier'],
-      \     'css': ['prettier']
+      \     'css': ['prettier'],
+      \     'yaml': ['prettier'],
+      \    'jsonnet': ['jsonnetfmt']
       \}
     let g:ale_rust_cargo_use_clippy = 1
     let g:ale_virtualtext_cursor = 1
@@ -79,6 +82,9 @@ let
     # fzf
     vim-sleuth
     # onedark-vim
+
+    # Grafana
+    vim-jsonnet
     
   ];
 
