@@ -20,7 +20,14 @@ let
     
     " Color scheme
     "colorscheme ondedark
+   
+    " FZF Configuration - ignore build files and generated content
+    " let $FZF_DEFAULT_COMMAND = 'fd --type f --hidden --follow --exclude .git --exclude node_modules --exclude target --exclude dist --exclude build --exclude .next --exclude coverage --exclude __pycache__ --exclude .pytest_cache --exclude .venv --exclude venv --exclude .env'
+    " let g:fzf_files_options = '--preview "bat --color=always --style=header,grid --line-range :300 {}"'
     
+    " Alternative if you don't have fd, use find with exclusions
+    let $FZF_DEFAULT_COMMAND = 'find . -type f ! -path "*/node_modules/*" ! -path "*/target/*" ! -path "*/dist/*" ! -path "*/build/*" ! -path "*/.git/*" ! -path "*/.next/*" ! -path "*/coverage/*" ! -path "*/__pycache__/*"'
+
     " Rust settings
     let g:rustfmt_autosave = 1
     
@@ -32,7 +39,9 @@ let
       \    'typescriptreact': ['tsserver', 'eslint', 'tsc'],
       \    'javascript': ['eslint'],
       \    'json': ['eslint'],
-      \    'jsonnet': ['jsonnet']
+      \    'nix': ['nix'],
+      \    'jsonnet': ['jsonnet'],
+      \    'slint': ['languageserver']
       \}
     let g:ale_fixers = {
       \     'rust': ['rustfmt'],
@@ -41,12 +50,29 @@ let
       \     'json': ['prettier'],
       \     'css': ['prettier'],
       \     'yaml': ['prettier'],
-      \    'jsonnet': ['jsonnetfmt']
+      \     'nix': ['alejandra'],
+      \     'jsonnet': ['jsonnetfmt']
       \}
     let g:ale_rust_cargo_use_clippy = 1
     let g:ale_virtualtext_cursor = 1
     let g:ale_set_highlights = 0
-    
+
+    " Slint LSP Configuration
+    let g:ale_lanuageserver = {
+      \   'slint-lsp': {
+      \       'command': 'slint-lsp',
+      \       'language': 'slint',
+      \       'project_root': '.',
+      \   },
+      \}
+
+    " Manual Slint syntax highlighting
+     augroup slint_syntax
+         autocmd!
+         autocmd BufNewFile,BufRead *.slint setfiletype slint
+         autocmd FileType slint set commentstring=//%s
+     augroup END
+
     " Status line configuration
     set laststatus=2
     function! HasPaste()
@@ -56,7 +82,7 @@ let
         return 
     endfunction
     set statusline=\ %{HasPaste()}%F%m%r%h\ %w\ \ CWD:\ %r%{getcwd()}%h\ \ \ Line:\ %l\ \ Column:\ %c
-    
+
     " SQL formatting configuration
     augroup sql_migrations
         autocmd!
@@ -85,7 +111,7 @@ let
 
     # Grafana
     vim-jsonnet
-    
+
   ];
 
 in pkgs.vim_configurable.customize {

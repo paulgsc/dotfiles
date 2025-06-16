@@ -1,16 +1,21 @@
 # Edit this configuration file to define what should be installed on
 # your system.  Help is available in the configuration.nix(5) man page
 # and in the NixOS manual (accessible by running ‘nixos-help’).
-
-{ outputs, config, pkgs, ... }:
-
 {
-  imports =
-    [ # Include the results of the hardware scan.
-      ./hardware-configuration.nix
-      ./filesystems.nix
-    ];
+  outputs,
+  config,
+  pkgs,
+  ...
+}: {
+  imports = [
+    # Include the results of the hardware scan.
+    ./hardware-configuration.nix
+    ./filesystems.nix
 
+    # Custom opinionated modules
+    ./development
+    ./ssh-x11
+  ];
 
   nixpkgs = {
     overlays = [
@@ -93,12 +98,12 @@
   users.users.paulg = {
     isNormalUser = true;
     description = "Paul Gathondu";
-    extraGroups = [ "networkmanager" "wheel" "docker" "sshfs" ];
+    extraGroups = ["networkmanager" "wheel" "docker" "sshfs"];
     openssh.authorizedKeys.keys = [
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMJI8w7UZiLQLavfBW2SAmCPzTc817tgedFhLeakGue"
     ];
     packages = with pkgs; [
-    #  thunderbird
+      #  thunderbird
     ];
   };
 
@@ -148,7 +153,7 @@
   };
 
   # Open ports in the firewall.
-  networking.firewall.allowedTCPPorts = [ 80 443 22 ];
+  networking.firewall.allowedTCPPorts = [80 443 22 3000 3001 6006 9090 5540];
   # networking.firewall.allowedUDPPorts = [ ... ];
   # Or disable the firewall altogether.
   networking.firewall.enable = true;
@@ -169,7 +174,6 @@
   # Before changing this value read the documentation for this option
   # (e.g. man configuration.nix or on https://nixos.org/nixos/options.html).
   system.stateVersion = "23.11"; # Did you read the comment?
-   
-  nix.settings.experimental-features = [ "nix-command" "flakes" ];  
 
+  nix.settings.experimental-features = ["nix-command" "flakes"];
 }
