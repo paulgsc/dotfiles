@@ -8,6 +8,7 @@
     # Add more development tools here as you customize
     # Example: nodejs, python3, vscode, etc.
     alejandra
+    xclip
   ];
 
   # Development-specific services or configurations

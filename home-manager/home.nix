@@ -51,50 +51,48 @@
   # Add stuff for your user as you see fit:
   # programs.neovim.enable = true;
   home.packages = with pkgs; [
-  
-      # Networking Tools
-      curl
-      caddy
+    # Networking Tools
+    curl
+    caddy
 
-      # Shell Enahancements
-      fzf
-      vim-custom
-      # tmux
-      ripgrep
+    # Shell Enahancements
+    fzf
+    vim-custom
+    # tmux
+    ripgrep
 
-      # nix tools
-      # nix-update
-      # nixpkgs-review
-      # nix-serve
-      # nixpkgs-fmt
-      # nixfmt-rfc-style
-      # nix-output-monitor
-      # cmtr
+    # nix tools
+    # nix-update
+    # nixpkgs-review
+    # nix-serve
+    # nixpkgs-fmt
+    # nixfmt-rfc-style
+    # nix-output-monitor
+    # cmtr
 
-      # Rust tools
-      bandwhich
-      procs
-      # sd
-      # bat
-      # eza
-      # fd
-      # gpg-tui
-      # genpass
-      # hyperfine
+    # Rust tools
+    bandwhich
+    procs
+    # sd
+    # bat
+    # eza
+    # fd
+    # gpg-tui
+    # genpass
+    # hyperfine
 
-      # Node
-      nodejs_latest
-      nodePackages.pnpm
-      nodePackages.prettier
+    # Node
+    nodejs_latest
+    nodePackages.pnpm
+    nodePackages.prettier
 
-      # Docker
-      docker
-      docker-compose
+    # Docker
+    docker
+    docker-compose
 
-      # DB
-      sqlite
-      nodePackages.sql-formatter
-      
+    # DB
+    sqlite
+    nodePackages.sql-formatter
   ];
 
   # Enable home-manager and git
