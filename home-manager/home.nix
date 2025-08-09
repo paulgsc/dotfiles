@@ -89,6 +89,7 @@
     # Docker
     docker
     docker-compose
+    yamllint
 
     # DB
     sqlite

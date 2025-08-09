@@ -39,15 +39,22 @@
       \    'json': ['eslint'],
       \    'nix': ['nix'],
       \    'jsonnet': ['jsonnet'],
+      \    'yaml': ['yamllint']
       \    'slint': ['slint_lsp']
       \}
     let g:ale_fixers = {
       \     'rust': ['rustfmt'],
       \     'typescript': ['eslint', 'prettier'],
       \     'typescriptreact': ['eslint', 'prettier'],
+      \     'javascript': ['prettier'],
+      \     'javascriptreact': ['prettier'],
       \     'json': ['prettier'],
+      \     'jsonc': ['prettier'],
       \     'css': ['prettier'],
+      \     'html': ['prettier'],
       \     'yaml': ['prettier'],
+      \     'markdown': ['prettier'],
+      \     'mdx': ['prettier'],
       \     'nix': ['alejandra'],
       \     'slint': ['trim_whitespace', 'remove_trailing_lines'],
       \     'jsonnet': ['jsonnetfmt']
