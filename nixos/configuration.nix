@@ -15,6 +15,7 @@
     # Custom opinionated modules
     ./development
     ./ssh-x11
+    ./bootloader-cleanup
   ];
 
   nixpkgs = {
@@ -24,10 +25,6 @@
       outputs.overlays.unstable-packages
     ];
   };
-
-  # Bootloader.
-  boot.loader.systemd-boot.enable = true;
-  boot.loader.efi.canTouchEfiVariables = true;
 
   networking.hostName = "nixos"; # Define your hostname.
   # networking.wireless.enable = true;  # Enables wireless support via wpa_supplicant.
@@ -174,6 +171,4 @@
   # Before changing this value read the documentation for this option
   # (e.g. man configuration.nix or on https://nixos.org/nixos/options.html).
   system.stateVersion = "23.11"; # Did you read the comment?
-
-  nix.settings.experimental-features = ["nix-command" "flakes"];
 }

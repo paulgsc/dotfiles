@@ -32,14 +32,14 @@
     " ALE Configuration
     let g:ale_fix_on_save = 1
     let g:ale_linters = {
-      \    'rust': ['analyzer', 'cargo', 'clippy'],
+      \    'rust': ['analyzer', 'cargo'],
       \    'typescript': ['tsserver', 'eslint', 'tsc'],
       \    'typescriptreact': ['tsserver', 'eslint', 'tsc'],
       \    'javascript': ['eslint'],
       \    'json': ['eslint'],
       \    'nix': ['nix'],
       \    'jsonnet': ['jsonnet'],
-      \    'yaml': ['yamllint']
+      \    'yaml': ['yamllint'],
       \    'slint': ['slint_lsp']
       \}
     let g:ale_fixers = {
@@ -59,6 +59,8 @@
       \     'slint': ['trim_whitespace', 'remove_trailing_lines'],
       \     'jsonnet': ['jsonnetfmt']
       \}
+
+    let g:ale_rust_analyzer_flags = ['--', '-Z', 'unstable-options', '--', 'clippy']
     let g:ale_rust_cargo_use_clippy = 1
     let g:ale_virtualtext_cursor = 1
     let g:ale_set_highlights = 0
