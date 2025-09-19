@@ -86,6 +86,10 @@
     nodePackages.pnpm
     nodePackages.prettier
 
+    # Development Error Analysis Tools
+    cargo-errors
+    clippy-issues
+
     # Docker
     docker
     docker-compose
