@@ -100,6 +100,18 @@
     nodePackages.sql-formatter
   ];
 
+  programs.bash = {
+    enable = true;
+
+    # ensure bash history keeps only unique commands
+    historyControl = ["erasedups" "ignoredups"];
+
+    # optional: make history bigger and append to file
+    # historyFileSize = 10000;
+    # historySize = 10000;
+    # historyOptions = ["histappend" "cmdhist" "expand_history"];
+  };
+
   # Enable home-manager and git
   programs.home-manager.enable = true;
   programs.git.enable = true;

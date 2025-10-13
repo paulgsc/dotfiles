@@ -16,6 +16,8 @@
     ./development
     ./ssh-x11
     ./bootloader-cleanup
+    ./ports
+    ./port-configuration
   ];
 
   nixpkgs = {
@@ -150,7 +152,7 @@
   };
 
   # Open ports in the firewall.
-  networking.firewall.allowedTCPPorts = [80 443 22 3000 3001 3030 6006 9090 5000 5540 5050];
+  # networking.firewall.allowedTCPPorts = [ ... ];
   # networking.firewall.allowedUDPPorts = [ ... ];
   # Or disable the firewall altogether.
   networking.firewall.enable = true;
