@@ -21,15 +21,6 @@
 
     # Define individual ports
     ports = [
-      # Web services
-      {
-        port = 80;
-        protocol = "tcp";
-        service = "nginx";
-        description = "HTTP web server";
-        externalAccess = false;
-      }
-      # SSH
       {
         port = 22;
         protocol = "tcp";
@@ -37,8 +28,13 @@
         description = "SSH remote access";
         externalAccess = true;
       }
-
-      # Development servers
+      {
+        port = 80;
+        protocol = "tcp";
+        service = "nginx";
+        description = "HTTP web server";
+        externalAccess = false;
+      }
       {
         port = 3000;
         protocol = "tcp";
@@ -46,12 +42,46 @@
         description = "Axum server";
         externalAccess = false;
       }
-
-      # Monitoring
       {
         port = 3001;
         service = "grafana";
         description = "Grafana dashboards - accessed from browsers";
+        externalAccess = false;
+      }
+      {
+        port = 3030;
+        protocol = "tcp";
+        service = "metabase";
+        description = "Metabase Dashboard";
+        lastUsed = "2025-10-12";
+        owner = "realtime-team";
+        externalAccess = false;
+      }
+      {
+        port = 4222;
+        protocol = "tcp";
+        service = "nats";
+        description = "Async Nats Transport - Client pub/sub";
+        externalAccess = false;
+      }
+      {
+        port = 5050;
+        service = "vite-www";
+        description = "WWW project dev server - accessed from browsers";
+        externalAccess = false;
+        interfaces = ["lo"]; # localhost only
+      }
+      {
+        port = 5540;
+        service = "redisinsight";
+        description = "Redis admin UI - accessed from browser";
+        externalAccess = false;
+        interfaces = [];
+      }
+      {
+        port = 6006;
+        service = "storybook";
+        description = "Storybook component dev - accessed from browsers";
         externalAccess = false;
       }
       {
@@ -62,16 +92,29 @@
         interfaces = [];
       }
       {
-        port = 5540;
-        service = "redisinsight";
-        description = "Redis admin UI - accessed from browser";
+        port = 8222;
+        protocol = "tcp";
+        service = "nats";
+        description = "Async Nats Transport - HTTP monitoring API";
         externalAccess = false;
-        interfaces = [];
+      }
+      {
+        port = 8282;
+        protocol = "tcp";
+        service = "nats-surveyor";
+        description = "Async Nats Transport - Nats insight dashabord service";
+        externalAccess = false;
       }
       {
         port = 9090;
         service = "prometheus";
         description = "Prometheus - accessed from Grafana + browsers";
+        externalAccess = false;
+      }
+      {
+        port = 9100;
+        service = "node-exporter";
+        description = "CPU Monitoring";
         externalAccess = false;
       }
       {
@@ -88,36 +131,6 @@
         description = "Node exporter for Prometheus";
         lastUsed = "2025-10-12";
         owner = "devops-team";
-        externalAccess = false;
-      }
-
-      # Application specific
-      {
-        port = 5050;
-        service = "vite-www";
-        description = "WWW project dev server - accessed from browsers";
-        externalAccess = false;
-        interfaces = ["lo"]; # localhost only
-      }
-      {
-        port = 6006;
-        service = "storybook";
-        description = "Storybook component dev - accessed from browsers";
-        externalAccess = false;
-      }
-      {
-        port = 3030;
-        protocol = "tcp";
-        service = "metabase";
-        description = "Metabase Dashboard";
-        lastUsed = "2025-10-12";
-        owner = "realtime-team";
-        externalAccess = false;
-      }
-      {
-        port = 9100;
-        service = "node-exporter";
-        description = "CPU Monitoring";
         externalAccess = false;
       }
     ];

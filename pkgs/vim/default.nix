@@ -52,7 +52,7 @@
       \     'jsonc': ['prettier'],
       \     'css': ['prettier'],
       \     'html': ['prettier'],
-      \     'yaml': ['prettier'],
+      \     'yaml': ['yamlfmt'],
       \     'markdown': ['prettier'],
       \     'mdx': ['prettier'],
       \     'nix': ['alejandra'],

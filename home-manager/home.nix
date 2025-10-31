@@ -94,6 +94,7 @@
     docker
     docker-compose
     yamllint
+    yamlfmt
 
     # DB
     sqlite

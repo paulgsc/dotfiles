@@ -1,27 +1,79 @@
-{ config, pkgs, lib, ... }:
-
-let
+{
+  config,
+  pkgs,
+  lib,
+  ...
+}: let
   customTMUXConfig = ''
-    set -g base-index 1
-    setw -g pane-base-index 1
+        # ────────────────────────────────
+        # General
+        # ────────────────────────────────
+        set -g base-index 1
+        setw -g pane-base-index 1
+        # set -g mouse on
+        # set -g history-limit 10000
+        set -g status-interval 5
+        set -g default-terminal "screen-256color"
 
-    # Status bar customization
-    set -g status-bg blue
-    set -g status-position bottom
-    set -g status-left-length 50
-    
-    # Git branch and status
-    set -g status-left "#[fg=white]branch: #(cd #{pane_current_path}; git rev-parse --abbrev-ref HEAD)#[default]"
-    
-    # Last modified file info
-    set -g status-right "#[fg=yellow]#(cd #{pane_current_path}; ls -lt | head -n2 | tail -n1 | awk '{print $6,$7,$8,$9}')"
-    
-    # Window settings
-    setw -g automatic-rename on
-    set -g renumber-windows on
-    
+        # ────────────────────────────────
+        # Visual Theme
+        # ────────────────────────────────
+        set -g status on
+        set -g status-bg colour18
+        set -g status-fg white
+        set -g status-style "bg=colour18,fg=white"
+        set -g message-style "bg=colour18,fg=brightyellow"
+        set -g pane-border-style "fg=colour238"
+        set -g pane-active-border-style "fg=colour81"
+        set -g window-status-format " #[fg=brightblack]#I:#W "
+        set -g window-status-current-format "#[fg=colour81,bold]#I:#W#[fg=white]"
+
+        # ────────────────────────────────
+        # Git-aware Status Left
+        # ────────────────────────────────
+        set -g status-left-length 80
+        set -g status-left '#[fg=cyan,bold]🧑 #(cd #{pane_current_path} && git config user.name 2>/dev/null || echo "Unknown") \
+    #[fg=white](#(cd #{pane_current_path} && git remote get-url origin 2>/dev/null | sed -n "s/.*github\\.com[:/]\\([^/]*\\)\\/.*$/@\\1/p" | head -n1 || echo "@local")) \
+    #[fg=white]· \
+    #[fg=yellow,bold]📦 #(cd #{pane_current_path} && basename $(git rev-parse --show-toplevel 2>/dev/null) || basename #{pane_current_path}) \
+    #[fg=white]: \
+    #[fg=green,bold]🌿 #(cd #{pane_current_path} && git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "-") \
+    #(cd #{pane_current_path} && git diff --quiet 2>/dev/null || echo "🔴")#[default]'
+
+        # ────────────────────────────────
+        # Status Right — system + time + file info
+        # ────────────────────────────────
+        set -g status-right-length 120
+        set -g status-right '#[fg=brightblack]💻 #(hostname -s) \
+    #[fg=white]| #[fg=cyan]⏰ %Y-%m-%d %H:%M \
+    #[fg=white]| #[fg=yellow]🔋 #(upower -i $(upower -e | grep BAT) 2>/dev/null | grep -E "percentage" | awk "{print \$2}" || echo "AC") \
+    #[fg=white]| #[fg=magenta]🕒 #(uptime | awk -F"up " "{print \$2}" | cut -d"," -f1)#[default]'
+
+        # ────────────────────────────────
+        # Windows / Panes
+        # ────────────────────────────────
+        setw -g automatic-rename on
+        set -g renumber-windows on
+        set -g display-time 3000
+        set -g visual-activity on
+        setw -g aggressive-resize on
+
+        # ────────────────────────────────
+        # Key Bindings
+        # ────────────────────────────────
+        bind r source-file ~/.tmux.conf \; display-message "🔁 Reloaded tmux config"
+        bind-key -r H resize-pane -L 5
+        bind-key -r J resize-pane -D 5
+        bind-key -r K resize-pane -U 5
+        bind-key -r L resize-pane -R 5
+
+        # ────────────────────────────────
+        # Optional Aesthetic Touches
+        # ────────────────────────────────
+        set -g clock-mode-colour colour81
+        set -g clock-mode-style 24
+        set -g bell-action none
   '';
-
 in {
   programs.tmux = {
     enable = true;
@@ -30,4 +82,3 @@ in {
     extraConfig = customTMUXConfig;
   };
 }
-
