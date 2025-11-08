@@ -92,17 +92,17 @@
         interfaces = [];
       }
       {
+        port = 7777;
+        protocol = "tcp";
+        service = "nats-exporter";
+        description = "Exports NATS metrics in Prometheus format";
+        externalAccess = false;
+      }
+      {
         port = 8222;
         protocol = "tcp";
         service = "nats";
         description = "Async Nats Transport - HTTP monitoring API";
-        externalAccess = false;
-      }
-      {
-        port = 8282;
-        protocol = "tcp";
-        service = "nats-surveyor";
-        description = "Async Nats Transport - Nats insight dashabord service";
         externalAccess = false;
       }
       {
@@ -123,6 +123,12 @@
         description = "Prometheus blackbox exporter";
         externalAccess = false;
         interfaces = [];
+      }
+      {
+        port = 9121;
+        service = "redis-exporter";
+        description = "Exports Redis metrics in Prometheus format";
+        externalAccess = false;
       }
       {
         port = 9256;
