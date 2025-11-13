@@ -18,7 +18,7 @@ import asyncio
 import threading
 import struct
 import time
-from queue import Queue
+from queue import Queue, Empty
 import sys
 
 # Try to import NATS and audio libraries
@@ -223,9 +223,6 @@ class AudioCapture:
             log("Audio capture stopped")
 
 
-# #######################
-# NATS PUBLISHER WITH RETRY BACKOFF
-# #######################
 async def nats_publisher():
     """Async NATS publisher loop with exponential backoff"""
     global nc
@@ -277,7 +274,7 @@ async def nats_publisher():
                         log(f"Published {chunks_published} chunks to NATS")
                         last_log_time = now
                     
-                except:
+                except Empty:
                     # Queue timeout - no audio available, just continue
                     await asyncio.sleep(0.01)
             
