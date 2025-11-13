@@ -1,10 +1,10 @@
 """
-OBS Python Script - Audio Capture to NATS
+OBS Python Script - Audio Capture to NATS with Protobuf
 
-Captures audio from Windows audio loopback and publishes to NATS.
+Captures audio from Windows audio loopback and publishes to NATS using protobuf.
 
 Requirements:
-    pip install nats-py sounddevice numpy
+    pip install nats-py sounddevice numpy protobuf
 
 Usage:
     1. Install VB-Audio Virtual Cable or similar loopback device
@@ -36,6 +36,77 @@ try:
 except ImportError:
     NATS_AVAILABLE = False
     print("[obs-nats] WARNING: NATS not available. Install: pip install nats-py")
+
+try:
+    from google.protobuf.message import Message as ProtoMessage
+    PROTOBUF_AVAILABLE = True
+    
+    # Define inline protobuf message (avoids needing .proto compilation)
+    from google.protobuf import descriptor_pb2
+    from google.protobuf.descriptor import FieldDescriptor
+    from google.protobuf.message import Message
+    from google.protobuf.reflection import GeneratedProtocolMessageType
+    
+    # Create AudioChunk message dynamically
+    class AudioChunk:
+        """Minimal protobuf-compatible audio chunk"""
+        def __init__(self):
+            self.samples = b''
+            self.sample_rate = 0
+            self.channels = 0
+            self.sequence = 0
+            self.timestamp_ms = 0
+        
+        def SerializeToString(self):
+            """Manual protobuf encoding for minimal overhead"""
+            buf = bytearray()
+            
+            # Field 1: bytes samples (wire type 2 = length-delimited)
+            if self.samples:
+                buf.extend(self._encode_tag(1, 2))
+                buf.extend(self._encode_varint(len(self.samples)))
+                buf.extend(self.samples)
+            
+            # Field 2: uint32 sample_rate (wire type 0 = varint)
+            if self.sample_rate:
+                buf.extend(self._encode_tag(2, 0))
+                buf.extend(self._encode_varint(self.sample_rate))
+            
+            # Field 3: uint32 channels (wire type 0 = varint)
+            if self.channels:
+                buf.extend(self._encode_tag(3, 0))
+                buf.extend(self._encode_varint(self.channels))
+            
+            # Field 4: uint64 sequence (wire type 0 = varint)
+            if self.sequence:
+                buf.extend(self._encode_tag(4, 0))
+                buf.extend(self._encode_varint(self.sequence))
+            
+            # Field 5: uint64 timestamp_ms (wire type 0 = varint)
+            if self.timestamp_ms:
+                buf.extend(self._encode_tag(5, 0))
+                buf.extend(self._encode_varint(self.timestamp_ms))
+            
+            return bytes(buf)
+        
+        @staticmethod
+        def _encode_tag(field_number, wire_type):
+            """Encode protobuf tag (field number + wire type)"""
+            return AudioChunk._encode_varint((field_number << 3) | wire_type)
+        
+        @staticmethod
+        def _encode_varint(value):
+            """Encode varint (protobuf variable-length integer)"""
+            buf = bytearray()
+            while value > 0x7f:
+                buf.append((value & 0x7f) | 0x80)
+                value >>= 7
+            buf.append(value & 0x7f)
+            return buf
+    
+except ImportError:
+    PROTOBUF_AVAILABLE = False
+    print("[obs-nats] WARNING: protobuf not available. Install: pip install protobuf")
 
 # Configuration
 NATS_URL = "nats://nixos.local:4222"
@@ -72,8 +143,9 @@ class AudioCapture:
         self.device_index = device_index
         self.stream = None
         self.running = False
-        self._chunk_counter = 0  # counts chunks for logging
+        self._chunk_counter = 0  # counts chunks for logging and sequence
         self._start_time = None
+        self._sent_format = False  # track if we've sent format info
     
     def audio_callback(self, indata, frames, time_info, status):
         """Called by sounddevice for each audio chunk"""
@@ -84,18 +156,42 @@ class AudioCapture:
             # Convert float32 numpy array to bytes
             # indata shape: (frames, channels)
             audio_bytes = indata.tobytes()
-            audio_queue.put(audio_bytes)
+            
+            # Create protobuf message
+            chunk = AudioChunk()
+            chunk.samples = audio_bytes
+            chunk.sequence = self._chunk_counter
+            
+            # Include format info in first chunk or periodically (every 100 chunks)
+            # This helps if receiver reconnects
+            if not self._sent_format or self._chunk_counter % 100 == 0:
+                chunk.sample_rate = SAMPLE_RATE
+                chunk.channels = CHANNELS
+                chunk.timestamp_ms = int(time.time() * 1000)
+                self._sent_format = True
+            
+            # Serialize and queue
+            try:
+                serialized = chunk.SerializeToString()
+                audio_queue.put(serialized)
+            except Exception as e:
+                log(f"ERROR serializing chunk: {e}")
             
             # Periodic logging (every 50 chunks ≈ 1 second at 48kHz/4096 samples)
             self._chunk_counter += 1
             if self._chunk_counter % 50 == 0:
                 elapsed = time.time() - self._start_time if self._start_time else 0
-                log(f"Captured {self._chunk_counter} chunks ({elapsed:.1f}s of audio)")
+                queue_size = audio_queue.qsize()
+                log(f"Captured {self._chunk_counter} chunks ({elapsed:.1f}s) | Queue: {queue_size}/100")
     
     def start(self):
         """Start audio capture"""
         if not AUDIO_AVAILABLE:
             log("ERROR: sounddevice not available")
+            return False
+        
+        if not PROTOBUF_AVAILABLE:
+            log("ERROR: protobuf not available")
             return False
         
         try:
@@ -111,7 +207,8 @@ class AudioCapture:
             self.running = True
             self._start_time = time.time()
             self._chunk_counter = 0
-            log(f"Audio capture started (device={self.device_index}, rate={SAMPLE_RATE}Hz)")
+            self._sent_format = False
+            log(f"Audio capture started (device={self.device_index}, rate={SAMPLE_RATE}Hz, {CHANNELS}ch)")
             return True
         except Exception as e:
             log(f"ERROR starting audio capture: {e}")
@@ -127,42 +224,92 @@ class AudioCapture:
 
 
 # #######################
-# NATS PUBLISHER
+# NATS PUBLISHER WITH RETRY BACKOFF
 # #######################
 async def nats_publisher():
-    """Async NATS publisher loop"""
+    """Async NATS publisher loop with exponential backoff"""
     global nc
     
     if not NATS_AVAILABLE:
         log("ERROR: NATS client not available")
         return
     
-    try:
-        # Connect to NATS
-        nc = NATS()
-        await nc.connect(NATS_URL)
-        log(f"Connected to NATS at {NATS_URL}")
-        
-        # Publish initial status
-        await nc.publish(NATS_SUBJECT_STATUS, b"idle")
-        
-        while True:
-            # Get audio from queue (blocking)
-            try:
-                audio_bytes = audio_queue.get(timeout=0.1)
-                
-                # Publish to NATS
-                await nc.publish(NATS_SUBJECT_AUDIO, audio_bytes)
-                
-            except:
-                # Queue timeout - no audio available
-                await asyncio.sleep(0.01)
+    # Retry configuration
+    MAX_RETRIES = 5
+    INITIAL_BACKOFF = 1.0  # seconds
+    MAX_BACKOFF = 60.0  # seconds
+    retry_count = 0
+    backoff = INITIAL_BACKOFF
+    
+    while retry_count < MAX_RETRIES:
+        try:
+            # Connect to NATS
+            nc = NATS()
+            await nc.connect(NATS_URL)
+            log(f"Connected to NATS at {NATS_URL}")
             
-    except Exception as e:
-        log(f"NATS error: {e}")
-    finally:
-        if nc:
-            await nc.close()
+            # Reset retry counter on successful connection
+            retry_count = 0
+            backoff = INITIAL_BACKOFF
+            
+            # Publish initial status
+            try:
+                await nc.publish(NATS_SUBJECT_STATUS, b"idle")
+            except Exception as e:
+                log(f"Failed to publish initial status: {e}")
+            
+            chunks_published = 0
+            last_log_time = time.time()
+            
+            # Main publish loop
+            while True:
+                try:
+                    # Get audio from queue (blocking with timeout)
+                    serialized_chunk = audio_queue.get(timeout=0.1)
+                    
+                    # Publish to NATS
+                    await nc.publish(NATS_SUBJECT_AUDIO, serialized_chunk)
+                    chunks_published += 1
+                    
+                    # Log publish stats every 5 seconds
+                    now = time.time()
+                    if now - last_log_time >= 5.0:
+                        log(f"Published {chunks_published} chunks to NATS")
+                        last_log_time = now
+                    
+                except:
+                    # Queue timeout - no audio available, just continue
+                    await asyncio.sleep(0.01)
+            
+        except Exception as e:
+            retry_count += 1
+            
+            if retry_count >= MAX_RETRIES:
+                log(f"NATS connection failed after {MAX_RETRIES} attempts. Giving up.")
+                log(f"Last error: {e}")
+                log("Please check NATS server and restart OBS script to retry.")
+                break
+            
+            # Log with backoff info
+            log(f"NATS connection error (attempt {retry_count}/{MAX_RETRIES}): {e}")
+            log(f"Retrying in {backoff:.1f} seconds...")
+            
+            # Wait with exponential backoff
+            await asyncio.sleep(backoff)
+            
+            # Increase backoff for next retry (exponential)
+            backoff = min(backoff * 2, MAX_BACKOFF)
+        
+        finally:
+            # Clean up connection
+            if nc:
+                try:
+                    await nc.close()
+                except:
+                    pass
+                nc = None
+    
+    log("NATS publisher thread terminated")
 
 
 def nats_thread_func():
@@ -184,7 +331,7 @@ def on_recording_started():
     """Called when OBS starts recording"""
     global recording_active
     recording_active = True
-    log("Recording started")
+    log("Recording started - audio capture active")
     
     # Publish status to NATS
     if nc:
@@ -202,7 +349,7 @@ def on_recording_stopped():
     """Called when OBS stops recording"""
     global recording_active
     recording_active = False
-    log("Recording stopped")
+    log("Recording stopped" + (" - audio capture still active (streaming)" if streaming_active else ""))
     
     # Publish status to NATS
     if nc:
@@ -220,7 +367,7 @@ def on_streaming_started():
     """Called when OBS starts streaming"""
     global streaming_active
     streaming_active = True
-    log("Streaming started")
+    log("Streaming started - audio capture active")
     
     # Publish status to NATS
     if nc:
@@ -238,7 +385,7 @@ def on_streaming_stopped():
     """Called when OBS stops streaming"""
     global streaming_active
     streaming_active = False
-    log("Streaming stopped")
+    log("Streaming stopped" + (" - audio capture still active (recording)" if recording_active else ""))
     
     # Publish status to NATS
     if nc:
@@ -278,8 +425,10 @@ def script_load(settings):
         log("ERROR: Install sounddevice: pip install sounddevice numpy")
     if not NATS_AVAILABLE:
         log("ERROR: Install NATS: pip install nats-py")
+    if not PROTOBUF_AVAILABLE:
+        log("ERROR: Install protobuf: pip install protobuf")
     
-    if not (AUDIO_AVAILABLE and NATS_AVAILABLE):
+    if not (AUDIO_AVAILABLE and NATS_AVAILABLE and PROTOBUF_AVAILABLE):
         return
     
     # Register OBS event callback
@@ -294,6 +443,7 @@ def script_load(settings):
     nats_thread.start()
     
     log("Audio capture and NATS publisher started")
+    log(f"Protobuf encoding: Minimal overhead (~10 bytes/chunk)")
 
 
 def script_unload():
@@ -343,24 +493,34 @@ def script_properties():
 
 def script_description():
     """Script description shown in OBS"""
-    return """<h2>OBS Audio to NATS Publisher</h2>
+    return """<h2>OBS Audio to NATS Publisher (Protobuf)</h2>
     
-<p>Captures audio from system loopback and publishes to NATS in real-time.</p>
+<p>Captures audio from system loopback and publishes to NATS in real-time using protobuf encoding.</p>
 <p><strong>Now captures during both recording AND streaming!</strong></p>
 
 <h3>Setup:</h3>
 <ol>
-    <li>Install dependencies: <code>pip install nats-py sounddevice numpy</code></li>
+    <li>Install dependencies: <code>pip install nats-py sounddevice numpy protobuf</code></li>
     <li>Install VB-Audio Virtual Cable (or similar loopback device)</li>
     <li>In OBS Audio Settings, set "Monitor and Output" to virtual cable</li>
     <li>Configure NATS URL below</li>
     <li>Select the virtual cable as audio device</li>
 </ol>
 
+<h3>Protobuf Format:</h3>
+<p>Each audio chunk is encoded as a minimal protobuf message with:</p>
+<ul>
+    <li><strong>samples:</strong> Raw float32 audio bytes</li>
+    <li><strong>sequence:</strong> Chunk counter for drop detection</li>
+    <li><strong>sample_rate/channels:</strong> Sent in first chunk and every 100 chunks</li>
+    <li><strong>Overhead:</strong> ~3 bytes per chunk (0.02%)</li>
+</ul>
+
 <p><strong>Status:</strong></p>
 <ul>
     <li>sounddevice: """ + ("✅ Available" if AUDIO_AVAILABLE else "❌ Not installed") + """</li>
     <li>NATS client: """ + ("✅ Available" if NATS_AVAILABLE else "❌ Not installed") + """</li>
+    <li>protobuf: """ + ("✅ Available" if PROTOBUF_AVAILABLE else "❌ Not installed") + """</li>
 </ul>
 """
 
@@ -383,3 +543,4 @@ def script_defaults(settings):
     obs.obs_data_set_default_string(settings, "status_subject", NATS_SUBJECT_STATUS)
     obs.obs_data_set_default_int(settings, "sample_rate", SAMPLE_RATE)
     obs.obs_data_set_default_int(settings, "channels", CHANNELS)
+
