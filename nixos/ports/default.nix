@@ -54,7 +54,7 @@ with lib; let
 
       interfaces = mkOption {
         type = types.listOf types.str;
-        default = [];
+        default = ["lo"];
         description = "Specific network interfaces to allow. Empty means all interfaces.";
         example = ["eth0" "wlan0"];
       };
