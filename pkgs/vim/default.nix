@@ -13,11 +13,12 @@
     set hlsearch
     set smartcase
     set cursorline
+    set termguicolors
     syntax on
     "set signcolumn=yes
 
     " Color scheme
-    "colorscheme ondedark
+    colorscheme ondedark
 
     " FZF Configuration - ignore build files and generated content
     " let $FZF_DEFAULT_COMMAND = 'fd --type f --hidden --follow --exclude .git --exclude node_modules --exclude target --exclude dist --exclude build --exclude .next --exclude coverage --exclude __pycache__ --exclude .pytest_cache --exclude .venv --exclude venv --exclude .env'
@@ -155,6 +156,8 @@
 
     # Color highlighting plugins
     vim-hexokinase
+    # Line highlighting
+    lightline-vim
   ];
 in
   pkgs.vim_configurable.customize {
