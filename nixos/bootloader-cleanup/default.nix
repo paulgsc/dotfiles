@@ -172,7 +172,7 @@
       echo "Running post-rebuild cleanup..."
 
       # This uses NixOS's safe built-in garbage collection
-      ${pkgs.nix}/bin/nix-collect-garbage --delete-older-than 14d || true
+      ${pkgs.nix}/bin/nix-collect-garbage --delete-older-than 28d || true
 
       # Check boot space and warn if needed
       BOOT_USAGE=$(df /boot | tail -1 | awk '{print $5}' | sed 's/%//')

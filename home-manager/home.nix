@@ -18,31 +18,6 @@
     ./shell/tmux
   ];
 
-  nixpkgs = {
-    # You can add overlays here
-    overlays = [
-      # Add overlays your own flake exports (from overlays and pkgs dir):
-      outputs.overlays.additions
-      outputs.overlays.modifications
-      outputs.overlays.unstable-packages
-
-      # You can also add overlays exported from other flakes:
-      # neovim-nightly-overlay.overlays.default
-
-      # Or define it inline, for example:
-      # (final: prev: {
-      #   hi = final.hello.overrideAttrs (oldAttrs: {
-      #     patches = [ ./change-hello-to-hi.patch ];
-      #   });
-      # })
-    ];
-    # Configure your nixpkgs instance
-    config = {
-      # Disable if you don't want unfree packages
-      allowUnfree = true;
-    };
-  };
-
   home = {
     username = "paulg";
     homeDirectory = "/home/paulg";
@@ -119,6 +94,26 @@
 
   # Nicely reload system units when changing configs
   systemd.user.startServices = "sd-switch";
+
+  systemd.user.services.hm-garbage-collector = {
+    Unit = {
+      Description = "Cleanup old Home Manager generations";
+    };
+    Service = {
+      Type = "oneshot";
+      # Expire generations older than 14 days, then collect garbage
+      ExecStart = "${pkgs.bash}/bin/bash -c '${pkgs.home-manager}/bin/home-manager expire-generations \"-28 days\" && ${pkgs.nix}/bin/nix-collect-garbage'";
+    };
+  };
+
+  systemd.user.timers.hm-garbage-collector = {
+    Unit = {Description = "Weekly cleanup of Home Manager generations";};
+    Timer = {
+      OnCalendar = "weekly";
+      Persistent = true;
+    };
+    Install = {WantedBy = ["timers.target"];};
+  };
 
   # https://nixos.wiki/wiki/FAQ/When_do_I_update_stateVersion
   home.stateVersion = "23.05";

@@ -13,12 +13,29 @@
     set hlsearch
     set smartcase
     set cursorline
+    " highlight CursorLine ctermbg=236 guibg=#2c2c2c
     set termguicolors
+    set background=dark
     syntax on
     "set signcolumn=yes
 
     " Color scheme
-    colorscheme ondedark
+    " colorscheme onedark
+    " Options: 'hard', 'medium' (default), 'soft'
+    let g:gruvbox_material_background = 'medium'
+
+    " Options: 'material', 'mix', 'original'
+    let g:gruvbox_material_palette = 'material'
+
+    " Better line highlighting
+    let g:gruvbox_material_cursor = 'auto'
+    let g:gruvbox_material_better_performance = 1
+
+    colorscheme gruvbox-material
+
+    " --- Lightline Integration ---
+    " This ensures your status bar matches the theme
+    let g:lightline = {'colorscheme': 'gruvbox_material'}
 
     " FZF Configuration - ignore build files and generated content
     " let $FZF_DEFAULT_COMMAND = 'fd --type f --hidden --follow --exclude .git --exclude node_modules --exclude target --exclude dist --exclude build --exclude .next --exclude coverage --exclude __pycache__ --exclude .pytest_cache --exclude .venv --exclude venv --exclude .env'
@@ -33,7 +50,7 @@
     " ALE Configuration
     let g:ale_fix_on_save = 1
     let g:ale_linters = {
-      \    'rust': ['analyzer', 'cargo'],
+      \    'rust': ['analyzer'],
       \    'typescript': ['tsserver', 'eslint', 'tsc'],
       \    'typescriptreact': ['tsserver', 'eslint', 'tsc'],
       \    'javascript': ['eslint'],
@@ -61,10 +78,20 @@
       \     'jsonnet': ['jsonnetfmt']
       \}
 
-    let g:ale_rust_analyzer_flags = ['--', '-Z', 'unstable-options', '--', 'clippy']
+    let g:ale_rust_analyzer_config = {
+    \   'rust-analyzer': {
+    \     'checkOnSave': {
+    \       'command': 'clippy',
+    \     },
+    \   },
+    \ }
     let g:ale_rust_cargo_use_clippy = 1
     let g:ale_virtualtext_cursor = 1
     let g:ale_set_highlights = 0
+    let g:ale_lint_on_text_changed = 'always'
+    let g:ale_lint_delay = 1000 " Wait 1000ms after typing stops
+    let g:ale_lint_on_insert_leave = 1
+    let g:ale_command_wrapper = 'nice -n 15'
 
     " Slint LSP Configuration
     let g:ale_lsp_servers = {
@@ -158,6 +185,8 @@
     vim-hexokinase
     # Line highlighting
     lightline-vim
+    onedark-vim
+    gruvbox-material
   ];
 in
   pkgs.vim_configurable.customize {

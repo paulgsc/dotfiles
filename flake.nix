@@ -65,12 +65,18 @@
     # Available through 'home-manager --flake .#your-username@your-hostname'
     homeConfigurations = {
       "paulg@nixos" = home-manager.lib.homeManagerConfiguration {
-        pkgs = nixpkgs.legacyPackages.x86_64-linux; # Home-manager requires 'pkgs' instance
+        # Use a pkgs instance that has your overlays applied
+        pkgs = import nixpkgs {
+          system = "x86_64-linux";
+          overlays = [
+            outputs.overlays.additions
+            outputs.overlays.modifications
+            outputs.overlays.unstable-packages
+          ];
+          config.allowUnfree = true;
+        };
         extraSpecialArgs = {inherit inputs outputs;};
-        modules = [
-          # > Our main home-manager configuration file <
-          ./home-manager/home.nix
-        ];
+        modules = [./home-manager/home.nix];
       };
     };
   };
