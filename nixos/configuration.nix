@@ -18,6 +18,7 @@
     ./bootloader-cleanup
     ./ports
     ./port-configuration
+    ./subdomains
   ];
 
   nixpkgs = {
@@ -164,6 +165,19 @@
     publish.enable = true;
     publish.addresses = true;
     # publish.workstation = true;
+  };
+
+  services.subdomains = {
+    enable = true;
+    backend = "caddy";
+    baseDomain = "nixos.local";
+
+    hosts = {
+      "file_host" = {
+        enable = true;
+        proxyPass = "http://file_host:3000";
+      };
+    };
   };
 
   # This value determines the NixOS release from which the default
