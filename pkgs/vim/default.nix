@@ -42,7 +42,7 @@
     " let g:fzf_files_options = '--preview "bat --color=always --style=header,grid --line-range :300 {}"'
 
     " Alternative if you don't have fd, use find with exclusions
-    let $FZF_DEFAULT_COMMAND = 'find . -type f ! -path "*/node_modules/*" ! -path "*/target/*" ! -path "*/dist/*" ! -path "*/build/*" ! -path "*/.git/*" ! -path "*/.next/*" ! -path "*/coverage/*" ! -path "*/__pycache__/*"'
+    let $FZF_DEFAULT_COMMAND = 'git ls-files --exclude-standard --others --cached --modified'
 
     " Rust settings
     let g:rustfmt_autosave = 1
@@ -88,9 +88,10 @@
     let g:ale_rust_cargo_use_clippy = 1
     let g:ale_virtualtext_cursor = 1
     let g:ale_set_highlights = 0
-    let g:ale_lint_on_text_changed = 'always'
+    let g:ale_lint_on_text_changed = 'normal'
     let g:ale_lint_delay = 1000 " Wait 1000ms after typing stops
     let g:ale_lint_on_insert_leave = 1
+    let g:ale_lint_on_enter = 0                 " don't lint on buffer open
     let g:ale_command_wrapper = 'nice -n 15'
 
     " Slint LSP Configuration
