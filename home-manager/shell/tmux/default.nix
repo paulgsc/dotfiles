@@ -27,6 +27,14 @@
         set -g pane-active-border-style "fg=colour81"
         set -g window-status-format " #[fg=brightblack]#I:#W "
         set -g window-status-current-format "#[fg=colour81,bold]#I:#W#[fg=white]"
+        # Detect nix develop shell
+        if -F '#{env:IN_NIX_SHELL}' \
+          'set -g status-style "bg=colour52,fg=white"; \
+           set -g message-style "bg=colour52,fg=brightyellow"; \
+           set -g pane-active-border-style "fg=colour196"' \
+          'set -g status-style "bg=colour18,fg=white"; \
+           set -g message-style "bg=colour18,fg=brightyellow"; \
+           set -g pane-active-border-style "fg=colour81"'
 
         # ────────────────────────────────
         # Git-aware Status Left
