@@ -234,6 +234,19 @@
       }
 
       # ═══════════════════════════════════════════════════════════
+      # Typst PDF Port Preview (localhost only)
+      # ═══════════════════════════════════════════════════════════
+      {
+        port = 3141;
+        protocol = "tcp";
+        service = "typst preview";
+        description = "a tiny HTTP server that serves a live-updating HTML page
+                       # backed by typst's compiler websocket.";
+        externalAccess = false;
+        interfaces = ["lo"];
+      }
+
+      # ═══════════════════════════════════════════════════════════
       # Retired / Unused Services
       # ═══════════════════════════════════════════════════════════
       {

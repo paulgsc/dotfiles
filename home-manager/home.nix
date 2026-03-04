@@ -74,6 +74,10 @@
     # DB
     sqlite
     nodePackages.sql-formatter
+
+    # typst toolkit
+    typst
+    tinymist
   ];
 
   programs.bash = {
