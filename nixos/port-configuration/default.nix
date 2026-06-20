@@ -92,9 +92,9 @@
         port = 6006;
         protocol = "tcp";
         service = "storybook";
-        description = "Storybook component dev - localhost only";
+        description = "Storybook component dev (browser-accessed from LAN via nixos.local)";
         externalAccess = false;
-        interfaces = ["lo"];
+        srcSubnets = ["10.0.0.0/24"]; # headless box; browsed from Windows PC over mDNS
       }
 
       # ═══════════════════════════════════════════════════════════
@@ -114,9 +114,9 @@
         port = 5540;
         protocol = "tcp";
         service = "redisinsight";
-        description = "Redis admin UI - localhost only";
+        description = "Redis admin UI (browser-accessed from LAN via nixos.local)";
         externalAccess = false;
-        interfaces = ["lo"];
+        srcSubnets = ["10.0.0.0/24"];
         owner = "docker";
       }
 
@@ -150,9 +150,9 @@
         port = 3001;
         protocol = "tcp";
         service = "grafana";
-        description = "Grafana dashboards - localhost only";
+        description = "Grafana dashboards (browser-accessed from LAN via nixos.local)";
         externalAccess = false;
-        interfaces = ["lo"];
+        srcSubnets = ["10.0.0.0/24"];
         owner = "docker";
       }
 
@@ -160,9 +160,9 @@
         port = 9090;
         protocol = "tcp";
         service = "prometheus";
-        description = "Prometheus - localhost only";
+        description = "Prometheus UI (browser-accessed from LAN via nixos.local)";
         externalAccess = false;
-        interfaces = ["lo"];
+        srcSubnets = ["10.0.0.0/24"];
         owner = "docker";
       }
 
@@ -237,9 +237,9 @@
         port = 3141;
         protocol = "tcp";
         service = "typst-preview";
-        description = "tinymist live-preview HTTP server";
+        description = "tinymist live-preview HTTP server (vim binds --host nixos.local:3141, browsed from LAN)";
         externalAccess = false;
-        interfaces = ["lo"];
+        srcSubnets = ["10.0.0.0/24"];
       }
 
       # ═══════════════════════════════════════════════════════════
@@ -249,11 +249,11 @@
         port = 3030;
         protocol = "tcp";
         service = "metabase";
-        description = "Metabase Dashboard (RETIRED - not in docker ps)";
+        description = "Metabase Dashboard (browser-accessed from LAN via nixos.local; currently not running)";
         lastUsed = "2025-10-12";
         owner = "realtime-team";
         externalAccess = false;
-        interfaces = ["lo"];
+        srcSubnets = ["10.0.0.0/24"];
       }
     ];
 
