@@ -1,0 +1,78 @@
+name: Flake check
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1" # every Monday 06:00 UTC — lockfile update
+
+jobs:
+  check:
+    name: nix flake check + build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@v14
+
+      # Transparent binary cache — avoids rebuilding what nixpkgs already provides
+      - uses: DeterminateSystems/magic-nix-cache-action@v8
+
+      # Eval-check: catches option type errors, undefined attrs, and assertion failures
+      - name: nix flake check
+        run: nix flake check --no-build
+
+      # Build NixOS system closure (no switch — just validates the full build graph)
+      - name: build nixos toplevel
+        run: nix build --no-link .#nixosConfigurations.nixos.config.system.build.toplevel
+
+      # Build home-manager activation package
+      - name: build home-manager activation
+        run: nix build --no-link '.#homeConfigurations."paulg@nixos".activationPackage'
+
+      # Format check: fail if any .nix file is not alejandra-canonical
+      - name: check formatting
+        run: |
+          nix fmt
+          git diff --exit-code -- '*.nix' || {
+            echo "Nix files are not formatted. Run 'nix fmt' locally."
+            exit 1
+          }
+
+      # Static linting: dead code and common anti-patterns
+      - name: deadnix
+        run: nix run nixpkgs#deadnix -- --fail .
+
+      - name: statix
+        run: nix run nixpkgs#statix -- check .
+
+  lockfile-update:
+    name: weekly lockfile update
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v14
+      - uses: DeterminateSystems/magic-nix-cache-action@v8
+
+      - name: update flake inputs
+        run: nix flake update
+
+      - name: open PR if lockfile changed
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "chore(flake): weekly lockfile update"
+          title: "chore(flake): weekly lockfile update"
+          body: |
+            Automated weekly `nix flake update`.
+            Review the diff for any channel jumps before merging.
+          branch: automated/lockfile-update
+          delete-branch: true
