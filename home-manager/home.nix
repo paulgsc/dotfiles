@@ -16,6 +16,7 @@
     # Or modules exported from other flakes (such as nix-colors):
     # inputs.nix-colors.homeManagerModules.default
     ./shell/tmux
+    ./shell/git
   ];
 
   home = {
@@ -92,9 +93,8 @@
     # historyOptions = ["histappend" "cmdhist" "expand_history"];
   };
 
-  # Enable home-manager and git
+  # Enable home-manager (git is configured in ./shell/git)
   programs.home-manager.enable = true;
-  programs.git.enable = true;
 
   # Nicely reload system units when changing configs
   systemd.user.startServices = "sd-switch";

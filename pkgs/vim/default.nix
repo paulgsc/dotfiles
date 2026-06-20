@@ -210,6 +210,22 @@
     nnoremap <C-f> :Rg<CR>
     nnoremap <C-b> :Buffers<CR>
 
+    " --- Git review ergonomics (vim-fugitive) ---
+    " <leader>gs : interactive git status (stage/unstage/commit from here)
+    nnoremap <leader>gs :Git<CR>
+    " <leader>gb : blame the current file (who/why per line)
+    nnoremap <leader>gb :Git blame<CR>
+    " <leader>gl : commit log of the current file, navigable
+    nnoremap <leader>gl :0Gclog<CR>
+    " <leader>gL : full repo commit log into the quickfix list
+    nnoremap <leader>gL :Gclog<CR>
+    " <leader>gd : diff the working tree against HEAD in a split
+    nnoremap <leader>gd :Gvdiffsplit<CR>
+    " <leader>gr : "replay" this branch vs its base (delta-paginated) in a terminal
+    nnoremap <leader>gr :tab terminal git replayp<CR>
+    " <leader>gt : open tig on the current file's history without leaving vim
+    nnoremap <leader>gt :tab terminal tig %<CR>
+
     " Hexokinase Configuration (alternative colorizer)
     let g:Hexokinase_highlighters = ['backgroundfull']
     let g:Hexokinase_optInPatterns = [
