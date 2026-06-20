@@ -13,8 +13,13 @@
 	# };
   };
 
-  # When applied, the unstable nixpkgs set (declared in the flake inputs) will
-  # be accessible through 'pkgs.unstable'
+  # DORMANT: this overlay is defined but NOT applied anywhere until nixpkgs-unstable
+  # is declared as a flake input.  To activate:
+  #   1. Uncomment nixpkgs-unstable.url in flake.nix
+  #   2. Run `nix flake update nixpkgs-unstable` to populate flake.lock
+  #   3. Add outputs.overlays.unstable-packages back to the overlays lists in
+  #      flake.nix (homeConfigurations pkgs) and nixos/configuration.nix
+  # After that, pkgs.unstable.<name> becomes available everywhere.
   unstable-packages = final: _prev: {
     unstable = import inputs.nixpkgs-unstable {
       system = final.system;

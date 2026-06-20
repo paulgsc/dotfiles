@@ -3,10 +3,10 @@
   inputs = {
     # Nixpkgs
     nixpkgs.url = "github:nixos/nixpkgs/nixos-25.05";
-    # You can access packages and modules from different nixpkgs revs
-    # at the same time. Here's an working example:
+    # To enable pkgs.unstable.<pkg>, uncomment the line below and run `nix flake update`.
+    # Then add outputs.overlays.unstable-packages back to the overlays lists in this file
+    # and in nixos/configuration.nix.  See overlays/default.nix for the overlay definition.
     # nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
-    # Also see the 'unstable-packages' overlay at 'overlays/default.nix'.
 
     # Home manager
     home-manager.url = "github:nix-community/home-manager/release-25.05";
@@ -71,7 +71,7 @@
           overlays = [
             outputs.overlays.additions
             outputs.overlays.modifications
-            outputs.overlays.unstable-packages
+            # outputs.overlays.unstable-packages  # requires nixpkgs-unstable input (see above)
           ];
           config.allowUnfree = true;
         };
