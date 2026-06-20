@@ -28,4 +28,25 @@ result
 *.drv
 *.out
 
+# Editor noise
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Secrets — these must NEVER be committed
+# Policy: use agenix or sops-nix to manage real secrets declaratively.
+# If you ever need to add a secret file, it must be age/sops-encrypted first.
+*.pem
+*.key
+*.p12
+*.pfx
+secrets.yaml
+secrets.json
+.env
+.env.*
+age.key
+
 

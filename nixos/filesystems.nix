@@ -15,9 +15,11 @@
 
   # If it's a local drive, you might need to specify the device path like /dev/sda1
   fileSystems."/mnt/storage" = {
-    device = "/dev/sda1";  # Specify the device for your external drive
-    fsType = "ntfs";       # Or whatever filesystem is used (e.g., ext4, ntfs)
-    options = [ "defaults" ];  # Change options as necessary
+    device = "/dev/sda1";
+    fsType = "ntfs";
+    # nofail: a missing data disk must not block boot
+    # nosuid,nodev: data-only disk; no executable device files needed
+    options = ["defaults" "nofail" "nosuid" "nodev"];
   };
 
   # Ensure SSHFS is available

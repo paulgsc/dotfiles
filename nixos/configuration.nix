@@ -107,7 +107,10 @@
     ];
   };
 
-  # Enable automatic login for the user.
+  # Auto-login: accepted risk — this machine lives behind a locked door and is
+  # not encrypted at rest.  If the threat model ever changes (shared space, laptop,
+  # sensitive data at rest) disable these two lines and enable screen-lock on idle.
+  # Full-disk encryption (LUKS) would require a clean reinstall; track in issue #4.
   services.displayManager.autoLogin.enable = true;
   services.displayManager.autoLogin.user = "paulg";
 
