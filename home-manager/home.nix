@@ -16,6 +16,8 @@
     # Or modules exported from other flakes (such as nix-colors):
     # inputs.nix-colors.homeManagerModules.default
     ./shell/tmux
+    ./shell/git
+    ./shell/disk
   ];
 
   home = {
@@ -92,9 +94,8 @@
     # historyOptions = ["histappend" "cmdhist" "expand_history"];
   };
 
-  # Enable home-manager and git
+  # Enable home-manager (git is configured in ./shell/git)
   programs.home-manager.enable = true;
-  programs.git.enable = true;
 
   # Nicely reload system units when changing configs
   systemd.user.startServices = "sd-switch";
@@ -105,8 +106,19 @@
     };
     Service = {
       Type = "oneshot";
-      # Expire generations older than 14 days, then collect garbage
-      ExecStart = "${pkgs.bash}/bin/bash -c '${pkgs.home-manager}/bin/home-manager expire-generations \"-28 days\" && ${pkgs.nix}/bin/nix-collect-garbage'";
+      # RETENTION POLICY: 30 days (matches nixos/bootloader-cleanup).
+      # Logs /nix/store size before/after so `journalctl --user -u hm-garbage-collector`
+      # shows whether GC actually reclaimed anything.
+      ExecStart = let
+        gc = pkgs.writeShellScript "hm-gc.sh" ''
+          before=$(${pkgs.coreutils}/bin/du -sb /nix/store 2>/dev/null | ${pkgs.coreutils}/bin/cut -f1 || echo 0)
+          ${pkgs.home-manager}/bin/home-manager expire-generations "-30 days"
+          ${pkgs.nix}/bin/nix-collect-garbage
+          after=$(${pkgs.coreutils}/bin/du -sb /nix/store 2>/dev/null | ${pkgs.coreutils}/bin/cut -f1 || echo 0)
+          reclaimed=$(( ''${before:-0} - ''${after:-0} ))
+          echo "hm-gc: /nix/store $(${pkgs.coreutils}/bin/numfmt --to=iec ''${before:-0}) -> $(${pkgs.coreutils}/bin/numfmt --to=iec ''${after:-0}) (reclaimed $(${pkgs.coreutils}/bin/numfmt --to=iec ''${reclaimed#-}))"
+        '';
+      in "${gc}";
     };
   };
 

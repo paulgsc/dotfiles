@@ -7,19 +7,16 @@
   networking.managedPorts = {
     enable = true;
 
-    # Configure auto-retirement
+    # autoRetire surfaces a reminder in the audit report but does NOT filter ports at
+    # build time (Nix eval is pure; no wall-clock access). Review the report manually.
     autoRetire = {
       enable = true;
-      daysUntilRetirement = 90; # Review ports unused for 90 days
+      daysUntilRetirement = 90;
     };
 
-    # Generate audit reports
     generateAuditReport = true;
-
-    # Enable connection logging (useful for debugging, but verbose)
     enableLogging = false;
 
-    # Define individual ports
     ports = [
       # ═══════════════════════════════════════════════════════════
       # SSH - LAN access for management
@@ -29,8 +26,8 @@
         protocol = "tcp";
         service = "openssh";
         description = "SSH remote access (LAN only)";
-        externalAccess = false; # LAN ≠ Internet
-        interfaces = ["10.0.0.0/24"]; # Your home LAN subnet
+        externalAccess = false;
+        srcSubnets = ["10.0.0.0/24"]; # home LAN subnet
       }
 
       # ═══════════════════════════════════════════════════════════
@@ -42,7 +39,7 @@
         service = "nginx";
         description = "HTTP web server (Caddy reverse proxy)";
         externalAccess = false;
-        interfaces = ["10.0.0.0/24"]; # LAN access if browsing from phone/tablet
+        srcSubnets = ["10.0.0.0/24"]; # LAN access (phone/tablet)
         owner = "docker";
       }
 
@@ -52,7 +49,7 @@
         service = "caddy";
         description = "HTTPS web server (Caddy reverse proxy)";
         externalAccess = false;
-        interfaces = ["10.0.0.0/24"]; # LAN access
+        srcSubnets = ["10.0.0.0/24"];
         owner = "docker";
       }
 
@@ -65,7 +62,7 @@
         service = "file-host";
         description = "Axum file host server";
         externalAccess = false;
-        interfaces = ["10.0.0.0/24"]; # LAN - Docker exposed 0.0.0.0:3000
+        srcSubnets = ["10.0.0.0/24"]; # Docker binds 0.0.0.0:3000
         owner = "docker";
       }
 
@@ -73,14 +70,14 @@
         port = 5050;
         protocol = "tcp";
         service = "openai-edge-tts-proxy";
-        description = "OpenAI Edge TTS proxy (nginx → python backend)";
+        description = "OpenAI Edge TTS proxy (nginx -> python backend)";
         externalAccess = false;
-        interfaces = ["10.0.0.0/24"]; # LAN access - Docker exposed 0.0.0.0:5050
+        srcSubnets = ["10.0.0.0/24"]; # Docker binds 0.0.0.0:5050
         owner = "docker";
       }
 
       # ═══════════════════════════════════════════════════════════
-      # Development Servers (localhost only)
+      # Development Servers
       # ═══════════════════════════════════════════════════════════
       {
         port = 5173;
@@ -88,16 +85,16 @@
         service = "vite-www";
         description = "WWW project Vite dev server";
         externalAccess = false;
-        interfaces = ["10.0.0.0/24"]; # LAN - Docker exposed 0.0.0.0:5173
+        srcSubnets = ["10.0.0.0/24"]; # Docker binds 0.0.0.0:5173
       }
 
       {
         port = 6006;
         protocol = "tcp";
         service = "storybook";
-        description = "Storybook component dev - accessed from browsers";
+        description = "Storybook component dev (browser-accessed from LAN via nixos.local)";
         externalAccess = false;
-        interfaces = ["lo"];
+        srcSubnets = ["10.0.0.0/24"]; # headless box; browsed from Windows PC over mDNS
       }
 
       # ═══════════════════════════════════════════════════════════
@@ -107,9 +104,9 @@
         port = 6379;
         protocol = "tcp";
         service = "redis";
-        description = "Redis - Docker internal + LAN monitoring tools";
+        description = "Redis - LAN monitoring tools only";
         externalAccess = false;
-        interfaces = ["10.0.0.0/24"]; # Docker exposed 0.0.0.0:6379
+        srcSubnets = ["10.0.0.0/24"]; # Docker binds 0.0.0.0:6379; no auth → LAN-only
         owner = "docker";
       }
 
@@ -117,9 +114,9 @@
         port = 5540;
         protocol = "tcp";
         service = "redisinsight";
-        description = "Redis admin UI - accessed from browser";
+        description = "Redis admin UI (browser-accessed from LAN via nixos.local)";
         externalAccess = false;
-        interfaces = ["lo"]; # Localhost only unless you need LAN access
+        srcSubnets = ["10.0.0.0/24"];
         owner = "docker";
       }
 
@@ -132,7 +129,7 @@
         service = "nats";
         description = "NATS client pub/sub";
         externalAccess = false;
-        interfaces = ["10.0.0.0/24"]; # Docker exposed 0.0.0.0:4222
+        srcSubnets = ["10.0.0.0/24"]; # Docker binds 0.0.0.0:4222
         owner = "docker";
       }
 
@@ -142,7 +139,7 @@
         service = "nats";
         description = "NATS HTTP monitoring API";
         externalAccess = false;
-        interfaces = ["10.0.0.0/24"]; # Docker exposed 0.0.0.0:8222
+        srcSubnets = ["10.0.0.0/24"]; # Docker binds 0.0.0.0:8222
         owner = "docker";
       }
 
@@ -153,9 +150,9 @@
         port = 3001;
         protocol = "tcp";
         service = "grafana";
-        description = "Grafana dashboards - accessed from browsers";
+        description = "Grafana dashboards (browser-accessed from LAN via nixos.local)";
         externalAccess = false;
-        interfaces = ["lo"]; # Localhost only - access via reverse proxy if needed
+        srcSubnets = ["10.0.0.0/24"];
         owner = "docker";
       }
 
@@ -163,9 +160,9 @@
         port = 9090;
         protocol = "tcp";
         service = "prometheus";
-        description = "Prometheus - accessed from Grafana + browsers";
+        description = "Prometheus UI (browser-accessed from LAN via nixos.local)";
         externalAccess = false;
-        interfaces = ["lo"]; # Localhost only
+        srcSubnets = ["10.0.0.0/24"];
         owner = "docker";
       }
 
@@ -234,16 +231,15 @@
       }
 
       # ═══════════════════════════════════════════════════════════
-      # Typst PDF Port Preview (localhost only)
+      # Typst live preview (localhost only)
       # ═══════════════════════════════════════════════════════════
       {
         port = 3141;
         protocol = "tcp";
-        service = "typst preview";
-        description = "a tiny HTTP server that serves a live-updating HTML page
-                       # backed by typst's compiler websocket.";
+        service = "typst-preview";
+        description = "tinymist live-preview HTTP server (vim binds --host nixos.local:3141, browsed from LAN)";
         externalAccess = false;
-        interfaces = ["lo"];
+        srcSubnets = ["10.0.0.0/24"];
       }
 
       # ═══════════════════════════════════════════════════════════
@@ -253,37 +249,14 @@
         port = 3030;
         protocol = "tcp";
         service = "metabase";
-        description = "Metabase Dashboard (RETIRED - not in docker ps)";
+        description = "Metabase Dashboard (browser-accessed from LAN via nixos.local; currently not running)";
         lastUsed = "2025-10-12";
         owner = "realtime-team";
         externalAccess = false;
-        interfaces = ["lo"];
+        srcSubnets = ["10.0.0.0/24"];
       }
     ];
 
-    # Define port ranges (useful for development environments)
-    portRanges = [
-      # Example: Development server pool
-      # {
-      #   from = 4000;
-      #   to = 4010;
-      #   protocol = "tcp";
-      #   service = "dev-server-pool";
-      #   description = "Reserved for ephemeral development servers";
-      #   lastUsed = "2025-10-12";
-      #   owner = "dev-team";
-      # }
-
-      # Example: Microservices range
-      # {
-      #   from = 8000;
-      #   to = 8099;
-      #   protocol = "tcp";
-      #   service = "microservices";
-      #   description = "Port range for microservice instances";
-      #   lastUsed = "2025-10-12";
-      #   owner = "backend-team";
-      # }
-    ];
+    portRanges = [];
   };
 }

@@ -32,7 +32,10 @@
     gc = {
       automatic = true;
       dates = "weekly";
-      options = "--delete-older-than 7d"; # More aggressive cleanup
+      # RETENTION POLICY: 30 days, single source of truth shared with the
+      # post-rebuild hook below and home.nix's hm-garbage-collector.
+      # configurationLimit = 5 (above) independently caps boot entries.
+      options = "--delete-older-than 30d";
 
       # Also clean up boot files when doing GC
       # This uses nix-collect-garbage which is much safer
@@ -172,7 +175,8 @@
       echo "Running post-rebuild cleanup..."
 
       # This uses NixOS's safe built-in garbage collection
-      ${pkgs.nix}/bin/nix-collect-garbage --delete-older-than 28d || true
+      # RETENTION POLICY: 30 days (matches nix.gc.options and hm-garbage-collector)
+      ${pkgs.nix}/bin/nix-collect-garbage --delete-older-than 30d || true
 
       # Check boot space and warn if needed
       BOOT_USAGE=$(df /boot | tail -1 | awk '{print $5}' | sed 's/%//')

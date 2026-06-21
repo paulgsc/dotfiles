@@ -54,9 +54,25 @@ with lib; let
 
       interfaces = mkOption {
         type = types.listOf types.str;
-        default = ["lo"];
-        description = "Specific network interfaces to allow. Empty means all interfaces.";
+        default = [];
+        description = ''
+          Real network interface names to restrict ingress to (e.g. "eth0", "lo").
+          Do NOT pass CIDR subnets here — use srcSubnets for subnet-based restrictions.
+          Ports with interfaces = ["lo"] and no srcSubnets are omitted from the firewall
+          entirely: nixos-fw does not filter loopback traffic.
+        '';
         example = ["eth0" "wlan0"];
+      };
+
+      srcSubnets = mkOption {
+        type = types.listOf types.str;
+        default = [];
+        description = ''
+          Source IP subnets (CIDR notation) that may reach this port (LAN scoping).
+          Generates: iptables -A nixos-fw -s <subnet> -p <proto> --dport <port> -j nixos-fw-accept
+          The port is NOT added to allowedTCPPorts/allowedUDPPorts (not globally open).
+        '';
+        example = ["10.0.0.0/24" "192.168.1.0/24"];
       };
     };
   };
@@ -104,23 +120,24 @@ with lib; let
     };
   };
 
-  # Helper function to check if port is stale (unused for 90 days)
-  isStale = lastUsedStr: let
-    lastUsed = lastUsedStr;
-    # In a real implementation, you'd compare dates
-    # For now, we'll just warn about ports older than 90 days
-  in
-    false; # Placeholder - would need actual date comparison
+  # Predicate helpers
+  isGlobalPort = p: p.interfaces == [] && p.srcSubnets == [];
+  isLoopbackOnly = p: p.interfaces == ["lo"] && p.srcSubnets == [];
 
-  # Filter out stale ports if retirement is enabled
-  activePorts =
-    if cfg.autoRetire.enable
-    then filter (p: !isStale p.lastUsed) cfg.ports
-    else cfg.ports;
+  # Only ports with no interface/subnet restriction go into allowedTCPPorts
+  globalPorts = filter isGlobalPort cfg.ports;
 
-  # Generate TCP ports list
+  # Ports scoped by source subnet
+  subnetScopedPorts = filter (p: p.srcSubnets != []) cfg.ports;
+
+  # Ports scoped by real interface name (not lo-only, not subnet-scoped)
+  ifaceScopedPorts = filter (p:
+    p.srcSubnets == [] && p.interfaces != [] && !(isLoopbackOnly p))
+  cfg.ports;
+
+  # Only globally-open ports enter allowedTCPPorts/allowedUDPPorts
   tcpPorts = flatten (
-    (map (p: optional (p.protocol == "tcp" || p.protocol == "both") p.port) activePorts)
+    (map (p: optional (p.protocol == "tcp" || p.protocol == "both") p.port) globalPorts)
     ++ (map (r:
       if r.protocol == "tcp" || r.protocol == "both"
       then range r.from r.to
@@ -128,9 +145,8 @@ with lib; let
     cfg.portRanges)
   );
 
-  # Generate UDP ports list
   udpPorts = flatten (
-    (map (p: optional (p.protocol == "udp" || p.protocol == "both") p.port) activePorts)
+    (map (p: optional (p.protocol == "udp" || p.protocol == "both") p.port) globalPorts)
     ++ (map (r:
       if r.protocol == "udp" || r.protocol == "both"
       then range r.from r.to
@@ -138,62 +154,75 @@ with lib; let
     cfg.portRanges)
   );
 
-  # Generate interface-specific rules
-  interfaceRules = let
-    portsWithInterfaces = filter (p: p.interfaces != []) activePorts;
-  in
-    flatten (map (p:
-      map (iface: {
-        inherit (p) port protocol;
-        interface = iface;
-      })
-      p.interfaces)
-    portsWithInterfaces);
+  portProtos = p:
+    if p.protocol == "both" then ["tcp" "udp"] else [p.protocol];
 
-  # Generate port audit report
+  # LAN-scoped rules: -s <subnet> restricts by origin IP (not interface name)
+  subnetRuleLines =
+    concatMapStrings (p:
+      concatMapStrings (subnet:
+        concatMapStrings (proto:
+          "iptables -A nixos-fw -s ${subnet} -p ${proto} --dport ${toString p.port} -j nixos-fw-accept\n"
+        ) (portProtos p)
+      ) p.srcSubnets
+    ) subnetScopedPorts;
+
+  # Interface-restricted rules using real interface names
+  ifaceRuleLines =
+    concatMapStrings (p:
+      concatMapStrings (iface:
+        concatMapStrings (proto:
+          "iptables -A nixos-fw -i ${iface} -p ${proto} --dport ${toString p.port} -j nixos-fw-accept\n"
+        ) (portProtos p)
+      ) p.interfaces
+    ) ifaceScopedPorts;
+
   auditReport = pkgs.writeTextFile {
     name = "port-audit-report";
     text = ''
-      # Port Audit Report - Generated ${config.time.timeZone}
-      # Total Ports: ${toString (length activePorts)}
-      # Total Ranges: ${toString (length cfg.portRanges)}
+      # Port Audit Report
+      # Total Ports: ${toString (length cfg.ports)} | Ranges: ${toString (length cfg.portRanges)}
 
-      ## Individual Ports
+      ## Globally Open Ports (allowedTCPPorts — all interfaces)
       ${concatMapStringsSep "\n" (p: ''
-          - Port ${toString p.port}/${p.protocol}
-            Service: ${p.service}
-            Description: ${p.description}
-            Last Used: ${p.lastUsed}
-            Owner: ${p.owner}
-            External: ${
-            if p.externalAccess
-            then "Yes"
-            else "No"
-          }
+          - ${toString p.port}/${p.protocol}  ${p.service}: ${p.description}
+            Owner: ${p.owner} | Last Used: ${p.lastUsed} | External: ${
+          if p.externalAccess
+          then "YES"
+          else "No"
+        }
         '')
-        activePorts}
+        globalPorts}
 
-      ## Port Ranges
+      ## LAN-Scoped Ports (iptables -s <subnet> — NOT in allowedTCPPorts)
+      ${concatMapStringsSep "\n" (p: ''
+          - ${toString p.port}/${p.protocol}  ${p.service}: ${p.description}
+            Allowed from: ${concatStringsSep ", " p.srcSubnets} | Owner: ${p.owner} | Last Used: ${p.lastUsed}
+        '')
+        subnetScopedPorts}
+
+      ## Loopback-Only Ports (no firewall rule — bind service to 127.0.0.1)
+      ${concatMapStringsSep "\n" (p: ''
+          - ${toString p.port}/${p.protocol}  ${p.service}: ${p.description}
+        '')
+        (filter isLoopbackOnly cfg.ports)}
+
+      ## Port Ranges (globally open)
       ${concatMapStringsSep "\n" (r: ''
-          - Ports ${toString r.from}-${toString r.to}/${r.protocol}
-            Service: ${r.service}
-            Description: ${r.description}
-            Last Used: ${r.lastUsed}
-            Owner: ${r.owner}
+          - ${toString r.from}-${toString r.to}/${r.protocol}  ${r.service}: ${r.description}
+            Owner: ${r.owner} | Last Used: ${r.lastUsed}
         '')
         cfg.portRanges}
 
-      ## Security Notes
+      ## Security Summary
       ${
-        if any (p: p.externalAccess) activePorts
-        then "⚠️  WARNING: Some ports are marked for external access"
-        else "✓ No ports marked for external access"
+        if any (p: p.externalAccess) cfg.ports
+        then "WARNING: some ports marked externalAccess = true"
+        else "OK: no ports marked for external access"
       }
-      ${
-        if cfg.autoRetire.enable
-        then "✓ Auto-retirement enabled (${toString cfg.autoRetire.daysUntilRetirement} days)"
-        else "⚠️  Auto-retirement disabled"
-      }
+      NOTE: autoRetire is not enforced at build time (Nix eval is pure; no wall-clock access).
+      Manually review ports with lastUsed older than ${toString cfg.autoRetire.daysUntilRetirement} days.
+      After rebuild, verify scoping: sudo nft list ruleset | grep -A2 'nixos-fw'
     '';
   };
 in {
@@ -207,12 +236,11 @@ in {
       example = literalExpression ''
         [
           {
-            port = 80;
+            port = 22;
             protocol = "tcp";
-            service = "nginx";
-            description = "HTTP web server";
-            lastUsed = "2025-10-12";
-            externalAccess = true;
+            service = "openssh";
+            description = "SSH — LAN only";
+            srcSubnets = ["10.0.0.0/24"];
           }
         ]
       '';
@@ -221,31 +249,24 @@ in {
     portRanges = mkOption {
       type = types.listOf portRangeModule;
       default = [];
-      description = "List of port ranges to manage";
-      example = literalExpression ''
-        [
-          {
-            from = 3000;
-            to = 3010;
-            protocol = "tcp";
-            service = "development-servers";
-            description = "Dev environment port range";
-          }
-        ]
-      '';
+      description = "List of port ranges to manage (globally open)";
     };
 
     autoRetire = {
       enable = mkOption {
         type = types.bool;
-        default = true;
-        description = "Automatically warn about ports not used recently";
+        default = false;
+        description = ''
+          When true, surfaces a reminder in the audit report and a build warning.
+          Does NOT filter ports — Nix eval is pure and cannot compare lastUsed
+          against the real current date at build time.
+        '';
       };
 
       daysUntilRetirement = mkOption {
         type = types.int;
         default = 90;
-        description = "Number of days before a port is considered for retirement";
+        description = "Stale threshold used in audit report reminders.";
       };
     };
 
@@ -253,12 +274,6 @@ in {
       type = types.bool;
       default = true;
       description = "Generate a port audit report at /etc/port-audit.txt";
-    };
-
-    defaultDenyIncoming = mkOption {
-      type = types.bool;
-      default = true;
-      description = "Default deny all incoming connections except specified ports";
     };
 
     enableLogging = mkOption {
@@ -269,54 +284,48 @@ in {
   };
 
   config = mkIf cfg.enable {
-    # Apply firewall rules
+    assertions = [
+      {
+        # Catch accidental CIDRs in interfaces (slash is the tell)
+        assertion = all (p: all (iface: !(hasInfix "/" iface)) p.interfaces) cfg.ports;
+        message = ''
+          networking.managedPorts: one or more ports has a CIDR in `interfaces`.
+          `interfaces` must be real interface names (e.g. "eth0", "lo").
+          Use `srcSubnets` for subnet restrictions (e.g. "10.0.0.0/24").
+        '';
+      }
+    ];
+
     networking.firewall = {
       enable = true;
       allowedTCPPorts = tcpPorts;
       allowedUDPPorts = udpPorts;
-
-      # Log dropped packets if enabled
       logRefusedConnections = cfg.enableLogging;
-
-      # Interface-specific rules using extraCommands
-      extraCommands =
-        if interfaceRules != []
-        then
-          concatMapStringsSep "\n" (rule: ''
-            iptables -A nixos-fw -i ${rule.interface} -p ${
-              if rule.protocol == "both"
-              then "tcp"
-              else rule.protocol
-            } --dport ${toString rule.port} -j ACCEPT
-          '')
-          interfaceRules
-        else "";
+      extraCommands = ''
+        ${subnetRuleLines}
+        ${ifaceRuleLines}
+      '';
     };
 
-    # Generate audit report
     environment.etc."port-audit.txt" = mkIf cfg.generateAuditReport {
       source = auditReport;
     };
 
-    # Add a system check/reminder
     system.activationScripts.portAudit = mkIf cfg.generateAuditReport (
       stringAfter ["etc"] ''
         echo "Port audit report generated at /etc/port-audit.txt"
         ${
           if cfg.autoRetire.enable
-          then ''
-            echo "Auto-retirement is enabled. Review ports not used in ${toString cfg.autoRetire.daysUntilRetirement} days."
-          ''
+          then ''echo "Review ports with lastUsed older than ${toString cfg.autoRetire.daysUntilRetirement} days (manual review required)."''
           else ""
         }
       ''
     );
 
-    # Warnings for security concerns
     warnings =
-      (optional (any (p: p.externalAccess) activePorts)
-        "Some ports are marked for external access. Ensure they are properly secured.")
-      ++ (optional (!cfg.autoRetire.enable)
-        "Port auto-retirement is disabled. Consider enabling it to maintain minimal attack surface.");
+      (optional (any (p: p.externalAccess) cfg.ports)
+        "networking.managedPorts: some ports are marked externalAccess = true. Ensure they are properly secured.")
+      ++ (optional cfg.autoRetire.enable
+        "networking.managedPorts: autoRetire.enable is set but retirement is NOT enforced at build time. Use /etc/port-audit.txt for manual review.");
   };
 }
