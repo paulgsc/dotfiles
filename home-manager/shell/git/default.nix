@@ -40,7 +40,7 @@
   programs.git = {
     enable = true;
     userName = "Paul Gathondu";
-    userEmail = "aulgondu@gmail.com";
+    userEmail = "streakfor@gmail.com";
 
     # delta: syntax-highlighted diffs for diff / show / log -p and fugitive.
     delta = {
