@@ -86,6 +86,14 @@
       last = "log -1 HEAD --stat";
       praise = "blame -w -C -C -C"; # blame ignoring whitespace, following moves
 
+      # ── Gone-branch cleanup ───────────────────────────────────
+      # list local branches whose upstream was deleted (preview before sweep)
+      gone = "!git fetch --prune && git branch -vv | awk '/: gone]/{print $1}'";
+      # delete local branches whose upstream is gone (safe; fails if unmerged)
+      sweep = "!git fetch --prune && git branch -vv | awk '/: gone]/{print $1}' | xargs -r git branch -d";
+      # force-delete gone-upstream branches regardless of merge status
+      sweep-f = "!git fetch --prune && git branch -vv | awk '/: gone]/{print $1}' | xargs -r git branch -D";
+
       # ── Everyday quality-of-life ──────────────────────────────
       s = "status -sb";
       d = "diff";
