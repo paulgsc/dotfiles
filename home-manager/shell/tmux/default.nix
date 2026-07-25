@@ -81,6 +81,16 @@
         set -g clock-mode-colour colour81
         set -g clock-mode-style 24
         set -g bell-action none
+
+        # ────────────────────────────────
+        # Clipboard — OSC52 over the ssh TTY, no $DISPLAY/xclip
+        # (WAYLANDIA-CLIP #15/#18)
+        # ────────────────────────────────
+        set -g set-clipboard on
+        set -g allow-passthrough on
+        set -as terminal-overrides ',*:Ms=\E]52;c;%p1%s\007'
+        bind-key -T copy-mode-vi y send-keys -X copy-selection-and-cancel
+        bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-selection-and-cancel
   '';
 in {
   programs.tmux = {

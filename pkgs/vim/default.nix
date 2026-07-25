@@ -246,6 +246,26 @@
 
     " Manual toggle commands for colorizers
     nnoremap <leader>ch :HexokinaseToggle<CR>
+
+    " --- OSC52 clipboard yank (WAYLANDIA-CLIP #15/#19) ---
+    " "+y / "*y ride the OSC52 escape sequence over the controlling
+    " terminal instead of xclip + $DISPLAY. Wrapped for tmux passthrough
+    " (see home-manager/shell/tmux's `allow-passthrough on`).
+    function! s:OSC52Yank(text) abort
+      let b64 = substitute(system('base64 | tr -d "\n"', a:text), '\n\+$', '', '')
+      let seq = "\x1b]52;c;" . b64 . "\x07"
+      if !empty($TMUX)
+        let seq = "\x1bPtmux;\x1b" . seq . "\x1b\\"
+      endif
+      call writefile([seq], '/dev/tty', 'b')
+    endfunction
+
+    augroup osc52_yank
+      autocmd!
+      autocmd TextYankPost * if v:event.operator ==# 'y' && (v:event.regname ==# '+' || v:event.regname ==# '*')
+            \ | call s:OSC52Yank(getreg(v:event.regname))
+            \ | endif
+    augroup END
   '';
 
   plugins = with pkgs.vimPlugins; [
