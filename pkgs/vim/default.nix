@@ -252,7 +252,7 @@
     " terminal instead of xclip + $DISPLAY. Wrapped for tmux passthrough
     " (see home-manager/shell/tmux's `allow-passthrough on`).
     function! s:OSC52Yank(text) abort
-      let b64 = substitute(system('base64 | tr -d "\n"', a:text), '\n\+$', '', '')
+      let b64 = system('base64 | tr -d "\n"', a:text)
       let seq = "\x1b]52;c;" . b64 . "\x07"
       if !empty($TMUX)
         let seq = "\x1bPtmux;\x1b" . seq . "\x1b\\"

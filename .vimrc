@@ -60,7 +60,7 @@ set statusline=\ %{HasPaste()}%F%m%r%h\ %w\ \ CWD:\ %r%{getcwd()}%h\ \ \ Line:\ 
 " instead of xclip + $DISPLAY. Wrapped for tmux passthrough (see .tmux.conf's
 " `allow-passthrough on`). Mirrors pkgs/vim/default.nix.
 function! s:OSC52Yank(text) abort
-  let b64 = substitute(system('base64 | tr -d "\n"', a:text), '\n\+$', '', '')
+  let b64 = system('base64 | tr -d "\n"', a:text)
   let seq = "\x1b]52;c;" . b64 . "\x07"
   if !empty($TMUX)
     let seq = "\x1bPtmux;\x1b" . seq . "\x1b\\"
