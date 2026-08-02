@@ -12,7 +12,7 @@ WAYLANDIA-CLIP epic: [#15](https://github.com/paulgsc/dotfiles/issues/15).
 |---|---|---|
 | tmux copy-mode yank | `home-manager/shell/tmux`, `.tmux.conf` | [#18](https://github.com/paulgsc/dotfiles/issues/18) |
 | vim `"+y` / `"*y` | `pkgs/vim/default.nix`, `.vimrc` | [#19](https://github.com/paulgsc/dotfiles/issues/19) |
-| CLI pipes (`pocket query`, etc.) | `home-manager/shell/clipboard` (`osc52-copy`) | [#20](https://github.com/paulgsc/dotfiles/issues/20) |
+| CLI pipes (`pocket query`, etc.) | `home-manager/shell/clipboard` (`wclip`) | [#20](https://github.com/paulgsc/dotfiles/issues/20) |
 | System package | `xclip` removed from `nixos/development` | [#21](https://github.com/paulgsc/dotfiles/issues/21) |
 
 `X11Forwarding` itself is **not** removed here — that's gated on the
@@ -58,10 +58,10 @@ tmux source-file ~/.tmux.conf
 
 With `xclip` uninstalled and `$DISPLAY` unset, over **plain `ssh`** (no `-Y`):
 
-- [ ] **(a) Bare shell** — `printf 'hello' | osc52-copy`, then paste in Windows.
+- [ ] **(a) Bare shell** — `printf 'hello' | wclip`, then paste in Windows.
 - [ ] **(b) tmux copy-mode** — enter copy-mode, select text, `y`; paste in Windows.
 - [ ] **(c) vim `"+y`** — `"+yy` on a line in the managed vim; paste in Windows.
-- [ ] **(d) CLI pipe** — `pocket query | osc52-copy` (see below); paste in Windows.
+- [ ] **(d) CLI pipe** — `pocket query | wclip` (see below); paste in Windows.
 - [ ] **(b) again, after reconnect** — `tmux detach`, `tmux attach`, repeat the copy-mode yank.
 
 This is the acceptance gate for [#22](https://github.com/paulgsc/dotfiles/issues/22)
@@ -73,6 +73,6 @@ exercise the Windows-clipboard side of this chain.
 
 That repo is out of scope for this PR (different repository). Repoint the
 documented ergonomic there from `pocket query | wl-copy` to
-`pocket query | osc52-copy` in a follow-up change to `paulgsc/server`. Until
-that lands, use `osc52-copy` directly — `pocket` already writes the
+`pocket query | wclip` in a follow-up change to `paulgsc/server`. Until
+that lands, use `wclip` directly — `pocket` already writes the
 selection to stdout, so no behavioral change to `pocket` itself is needed.

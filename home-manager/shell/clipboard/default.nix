@@ -1,11 +1,11 @@
 {pkgs, ...}: let
-  # osc52-copy — pipe any command's stdout into the OSC52 escape sequence so
-  # it lands in the WSL/Windows clipboard over the existing ssh TTY. No
-  # xclip, no wl-copy, no local X/Wayland clipboard needed on the headless
-  # remote. WAYLANDIA-CLIP #15/#20.
+  # wclip — pipe any command's stdout into the OSC52 escape sequence so it
+  # lands in the WSL/Windows clipboard over the existing ssh TTY. No xclip,
+  # no wl-copy, no local X/Wayland clipboard needed on the headless remote.
+  # WAYLANDIA-CLIP #15/#20.
   #
-  # Usage: pocket query | osc52-copy   (replaces `pocket query | wl-copy`)
-  osc52-copy = pkgs.writeShellScriptBin "osc52-copy" ''
+  # Usage: pocket query | wclip   (replaces `pocket query | wl-copy`)
+  wclip = pkgs.writeShellScriptBin "wclip" ''
     set -euo pipefail
 
     b64=$(${pkgs.coreutils}/bin/base64 | ${pkgs.coreutils}/bin/tr -d '\n')
@@ -17,5 +17,5 @@
     fi
   '';
 in {
-  home.packages = [osc52-copy];
+  home.packages = [wclip];
 }
