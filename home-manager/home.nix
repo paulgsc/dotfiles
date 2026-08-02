@@ -18,6 +18,7 @@
     ./shell/tmux
     ./shell/git
     ./shell/disk
+    ./shell/clipboard
   ];
 
   home = {
