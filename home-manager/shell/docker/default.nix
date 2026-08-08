@@ -1,7 +1,7 @@
 {pkgs, ...}: let
   # docker-doctor — one-screen picture of every compose stack you have up:
   # host resources, per-container CPU/mem/net vs the machine, disk usage
-  # breakdown, and prune candidates. Same shape as disk-doctor.
+  # breakdown, and reclaim candidates. Same shape as disk-doctor.
   docker-doctor = pkgs.writeShellScriptBin "docker-doctor" ''
     set -uo pipefail
 
@@ -36,13 +36,15 @@
     hr "Prune candidates"
     dangling=$(${pkgs.docker}/bin/docker images -f dangling=true -q | ${pkgs.coreutils}/bin/wc -l)
     stopped=$(${pkgs.docker}/bin/docker ps -aq -f status=exited | ${pkgs.coreutils}/bin/wc -l)
-    vols=$(${pkgs.docker}/bin/docker volume ls -qf dangling=true | ${pkgs.coreutils}/bin/wc -l)
-    echo "  dangling images: $dangling   stopped containers: $stopped   unused volumes: $vols"
+    # Count all unused volumes (both named and anonymous) matching `docker volume prune -a` behavior
+    vols=$(${pkgs.docker}/bin/docker volume ls -q | ${pkgs.coreutils}/bin/wc -l)
+    echo "  dangling images: $dangling   stopped containers: $stopped   total volumes: $vols"
+    echo "  (see 'docker system df' above for total reclaimable volume and image space)"
 
     hr "What to do next"
-    echo "  Full TUI (logs/actions/live stats):  lazydocker"
-    echo "  Pure resource top (like htop):       ctop"
-    echo "  Why is this image so big?:           dive <image>"
+    echo "  Full TUI (logs/actions/live stats):   lazydocker"
+    echo "  Pure resource top (like htop):        ctop"
+    echo "  Why is this image so big?:            dive <image>"
     echo "  Reclaim space (previewed, confirmed): docker-reap"
   '';
 
@@ -81,8 +83,8 @@
     echo "Reclaimable space (docker system df):"
     ${pkgs.docker}/bin/docker system df
     echo
-    echo "This will remove: stopped containers, dangling images, unused networks."
-    [ "$VOLUMES" = "1" ] && echo "  ...and unused volumes (--volumes passed)."
+    echo "This will remove: stopped containers, unused images, unused networks."
+    [ "$VOLUMES" = "1" ] && echo "  ...and ALL unused volumes, including named volumes (--volumes passed)."
     if [ "$CACHE" = "1" ]; then
       echo "  ...and the ENTIRE build cache (--cache passed) — this is usually the"
       echo "      biggest and slowest part; it can take several minutes with no"
@@ -102,15 +104,20 @@
     step "pruning stopped containers"
     ${pkgs.docker}/bin/docker container prune -f
 
-    step "pruning dangling images"
-    ${pkgs.docker}/bin/docker image prune -f
+    step "pruning unused images"
+    # -a is intentional: without it Docker only removes dangling images.
+    # `docker system df` can report large amounts of reclaimable space from
+    # tagged images that are no longer referenced by any container.
+    ${pkgs.docker}/bin/docker image prune -a -f
 
     step "pruning unused networks"
     ${pkgs.docker}/bin/docker network prune -f
 
     if [ "$VOLUMES" = "1" ]; then
       step "pruning unused volumes"
-      ${pkgs.docker}/bin/docker volume prune -f
+      # -a is intentional: without -a Docker only removes anonymous volumes.
+      # -a also removes unused named volumes, matching the reclaimable count in `docker system df`.
+      ${pkgs.docker}/bin/docker volume prune -a -f
     fi
 
     if [ "$CACHE" = "1" ]; then
