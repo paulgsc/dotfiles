@@ -67,11 +67,22 @@ dive <image>   # layer-by-layer breakdown of an image, flags wasted space
 ## Reclaiming disk space
 
 `docker-reap` previews `docker system df` before doing anything, then asks
-for confirmation (or pass `-y`/`--yes` to skip the prompt; `--volumes` also
-sweeps unused volumes):
+for confirmation (or pass `-y`/`--yes` to skip the prompt). It runs each
+prune as a separate, labeled stage rather than one opaque
+`docker system prune` call:
 
 ```bash
-docker-reap             # containers, dangling images, networks, build cache
-docker-reap --volumes   # ...and unused volumes
-docker-reap -y          # non-interactive
+docker-reap                       # stopped containers, dangling images, unused networks
+docker-reap --volumes             # ...and unused volumes
+docker-reap --cache               # ...and the entire build cache
+docker-reap --all -y              # everything, non-interactive
 ```
+
+Build cache is opt-in (`--cache` / `--all`) and separated out on purpose:
+it's usually the largest and slowest part to prune (potentially 100+ GB
+across 1000+ entries) and prints nothing while it works. Treated as one
+`docker system prune`, that silence reads as a hang and invites a `^C`
+mid-prune — which leaves the cache half-cleaned rather than aborting
+cleanly. `docker-reap --cache` prints a timestamped start/finish around it
+so a long pause there is expected, not alarming — let it run to
+completion.
