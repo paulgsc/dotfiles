@@ -19,6 +19,7 @@
     ./shell/git
     ./shell/disk
     ./shell/clipboard
+    ./shell/docker
   ];
 
   home = {
@@ -68,9 +69,8 @@
     cargo-errors
     clippy-issues
 
-    # Docker
-    docker
-    docker-compose
+    # Docker packages, TUIs (lazydocker/ctop/dive) and scripts
+    # (docker-doctor/docker-reap) live in ./shell/docker
     yamllint
     yamlfmt
 
