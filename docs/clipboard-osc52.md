@@ -8,12 +8,12 @@ it into the Windows clipboard.
 
 WAYLANDIA-CLIP epic: [#15](https://github.com/paulgsc/dotfiles/issues/15).
 
-| Producer                         | Where it's configured                    | Story                                                |
-| -------------------------------- | ---------------------------------------- | ---------------------------------------------------- |
-| tmux copy-mode yank              | `home-manager/shell/tmux`, `.tmux.conf`  | [#18](https://github.com/paulgsc/dotfiles/issues/18) |
-| vim `"+y` / `"*y`                | `pkgs/vim/default.nix`, `.vimrc`         | [#19](https://github.com/paulgsc/dotfiles/issues/19) |
+| Producer | Where it's configured | Story |
+|---|---|---|
+| tmux copy-mode yank | `home-manager/shell/tmux`, `.tmux.conf` | [#18](https://github.com/paulgsc/dotfiles/issues/18) |
+| vim `"+y` / `"*y` | `pkgs/vim/default.nix`, `.vimrc` | [#19](https://github.com/paulgsc/dotfiles/issues/19) |
 | CLI pipes (`pocket query`, etc.) | `home-manager/shell/clipboard` (`wclip`) | [#20](https://github.com/paulgsc/dotfiles/issues/20) |
-| System package                   | `xclip` removed from `nixos/development` | [#21](https://github.com/paulgsc/dotfiles/issues/21) |
+| System package | `xclip` removed from `nixos/development` | [#21](https://github.com/paulgsc/dotfiles/issues/21) |
 
 `X11Forwarding` itself is **not** removed here — that's gated on the
 WAYLANDIA-GUI epic ([#16](https://github.com/paulgsc/dotfiles/issues/16)) and
@@ -23,8 +23,8 @@ is out of scope for this epic.
 
 ## One-time setup: enable OSC52 write on the WSL/Windows side
 
-The remote box only _emits_ the escape sequence — your local terminal
-emulator has to be willing to _write_ it into the Windows clipboard.
+The remote box only *emits* the escape sequence — your local terminal
+emulator has to be willing to *write* it into the Windows clipboard.
 
 - **Windows Terminal**: recent stable builds honor OSC52 write by default.
   If paste isn't landing, check Settings → your profile → and confirm there
@@ -37,6 +37,33 @@ emulator has to be willing to _write_ it into the Windows clipboard.
 Whichever terminal you use, re-verify with the test matrix below after any
 terminal update — this is exactly the kind of setting that regresses
 silently.
+
+## Known limitation: there is no `wclip -o` / `wpaste`
+
+`wclip` only covers the write direction: remote stdin → Windows clipboard.
+There is deliberately no companion command that reads the Windows clipboard
+back down to the remote box (the semantic equivalent of `xclip -selection
+clipboard -o > foo.txt`, sourced from the Windows side).
+
+OSC52 does define a query form for this (`ESC]52;c;?BEL`, to which a
+terminal replies with the clipboard contents), but **Windows Terminal
+refuses to implement it on purpose** — the maintainers consider replying to
+an unprompted clipboard read request from anything running in the terminal
+a silent-exfiltration security hole, and have rejected the feature outright
+([microsoft/terminal#9479](https://github.com/microsoft/terminal/issues/9479)).
+Since Windows Terminal is the terminal this setup targets, a `wpaste` built
+on OSC52 query would just hang waiting for a reply that never arrives —
+that's what went wrong in [#36](https://github.com/paulgsc/dotfiles/pull/36),
+which described such a command but never actually implemented or tested it.
+
+If you ever move to a terminal that supports OSC52 read (e.g. WezTerm, via
+the opt-in `enable_osc52_clipboard_reading = true`), it becomes possible in
+principle, but reads through tmux are unreliable even then — tmux has to
+proxy the query's reply back out, which is best-effort at best. Getting a
+Windows clipboard read down to a remote file reliably needs an
+out-of-band channel instead (e.g. a small clipboard server on the Windows
+side reached over a reverse `ssh -R` tunnel) — that's a separate epic, not
+an extension of `wclip`, and isn't implemented here.
 
 ## Rebuilding after this change
 
