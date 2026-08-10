@@ -38,6 +38,32 @@ Whichever terminal you use, re-verify with the test matrix below after any
 terminal update — this is exactly the kind of setting that regresses
 silently.
 
+## Reading the Windows clipboard
+
+`wclip --paste` (also available as `wpaste`) sends the OSC52 clipboard query
+to the local terminal and writes the decoded reply to stdout. This makes the
+Windows clipboard composable with normal shell tools:
+
+```bash
+wclip --paste > clipboard.txt
+wclip --paste | jq .
+wpaste | sha256sum
+```
+
+Clipboard **reading** is separate from OSC52 writing and is intentionally
+restricted by terminal emulators because it lets a remote process inspect
+the local clipboard. The command times out with a clear error when the local
+terminal does not implement OSC52 queries or has clipboard reads disabled.
+In particular, OSC52 write support alone does not guarantee that this works;
+it must be tested with the actual Windows terminal and its clipboard policy.
+Set `WPASTE_TIMEOUT` to change the two-second response timeout.
+
+If the Windows terminal does not support OSC52 reads, the reliable fallback
+has to originate on Windows/WSL, where the clipboard is locally accessible,
+for example piping `powershell.exe -NoProfile -Command Get-Clipboard` into an
+`ssh ... 'cat > clipboard.txt'` command. A remote process cannot otherwise
+pull the client clipboard over plain SSH.
+
 ## Rebuilding after this change
 
 ```bash
@@ -59,6 +85,13 @@ tmux source-file ~/.tmux.conf
 With `xclip` uninstalled and `$DISPLAY` unset, over **plain `ssh`** (no `-Y`):
 
 - [ ] **(a) Bare shell** — `printf 'hello' | wclip`, then paste in Windows.
+- [ ] **(a2) Output passthrough** — `printf 'hello' | wclip > /tmp/wclip-test`,
+  confirm `/tmp/wclip-test` contains `hello`, then paste `hello` in Windows.
+- [ ] **(a3) Pipeline passthrough** — `printf 'hello' | wclip | tr a-z A-Z`,
+  confirm the command prints `HELLO`, then paste the original `hello` in Windows.
+- [ ] **(a4) Clipboard read to file** — copy `from Windows`, run
+  `wclip --paste > /tmp/wclip-paste`, and confirm the file contains
+  `from Windows` (or confirm the terminal reports that reads are unsupported).
 - [ ] **(b) tmux copy-mode** — enter copy-mode, select text, `y`; paste in Windows.
 - [ ] **(c) vim `"+y`** — `"+yy` on a line in the managed vim; paste in Windows.
 - [ ] **(d) CLI pipe** — `pocket query | wclip` (see below); paste in Windows.
