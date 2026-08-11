@@ -8,12 +8,12 @@ it into the Windows clipboard.
 
 WAYLANDIA-CLIP epic: [#15](https://github.com/paulgsc/dotfiles/issues/15).
 
-| Producer | Where it's configured | Story |
-|---|---|---|
-| tmux copy-mode yank | `home-manager/shell/tmux`, `.tmux.conf` | [#18](https://github.com/paulgsc/dotfiles/issues/18) |
-| vim `"+y` / `"*y` | `pkgs/vim/default.nix`, `.vimrc` | [#19](https://github.com/paulgsc/dotfiles/issues/19) |
+| Producer                         | Where it's configured                    | Story                                                |
+| -------------------------------- | ---------------------------------------- | ---------------------------------------------------- |
+| tmux copy-mode yank              | `home-manager/shell/tmux`, `.tmux.conf`  | [#18](https://github.com/paulgsc/dotfiles/issues/18) |
+| vim `"+y` / `"*y`                | `pkgs/vim/default.nix`, `.vimrc`         | [#19](https://github.com/paulgsc/dotfiles/issues/19) |
 | CLI pipes (`pocket query`, etc.) | `home-manager/shell/clipboard` (`wclip`) | [#20](https://github.com/paulgsc/dotfiles/issues/20) |
-| System package | `xclip` removed from `nixos/development` | [#21](https://github.com/paulgsc/dotfiles/issues/21) |
+| System package                   | `xclip` removed from `nixos/development` | [#21](https://github.com/paulgsc/dotfiles/issues/21) |
 
 `X11Forwarding` itself is **not** removed here — that's gated on the
 WAYLANDIA-GUI epic ([#16](https://github.com/paulgsc/dotfiles/issues/16)) and
@@ -23,8 +23,8 @@ is out of scope for this epic.
 
 ## One-time setup: enable OSC52 write on the WSL/Windows side
 
-The remote box only *emits* the escape sequence — your local terminal
-emulator has to be willing to *write* it into the Windows clipboard.
+The remote box only _emits_ the escape sequence — your local terminal
+emulator has to be willing to _write_ it into the Windows clipboard.
 
 - **Windows Terminal**: recent stable builds honor OSC52 write by default.
   If paste isn't landing, check Settings → your profile → and confirm there
@@ -59,6 +59,10 @@ tmux source-file ~/.tmux.conf
 With `xclip` uninstalled and `$DISPLAY` unset, over **plain `ssh`** (no `-Y`):
 
 - [ ] **(a) Bare shell** — `printf 'hello' | wclip`, then paste in Windows.
+- [ ] **(a2) Output passthrough** — `printf 'hello' | wclip > /tmp/wclip-test`,
+      confirm `/tmp/wclip-test` contains `hello`, then paste `hello` in Windows.
+- [ ] **(a3) Pipeline passthrough** — `printf 'hello' | wclip | tr a-z A-Z`,
+      confirm the command prints `HELLO`, then paste the original `hello` in Windows.
 - [ ] **(b) tmux copy-mode** — enter copy-mode, select text, `y`; paste in Windows.
 - [ ] **(c) vim `"+y`** — `"+yy` on a line in the managed vim; paste in Windows.
 - [ ] **(d) CLI pipe** — `pocket query | wclip` (see below); paste in Windows.
