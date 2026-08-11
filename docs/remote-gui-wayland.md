@@ -104,8 +104,26 @@ reintroduced an X server as a *build-time dependency of the test path* in the
 same change that deletes X from the ssh path. `cage` keeps the headed story
 Wayland-native.
 
-Chromium does not pick Wayland on its own — the fixtures need to launch it
-with:
+### The live edge: Chromium does not pick Wayland on its own
+
+Chromium's default Ozone backend on Linux is **X11**, not Wayland. Setting
+`WAYLAND_DISPLAY` is enough to stop the fixtures choosing `--headless=new`,
+but it is *not* enough to make the browser itself speak Wayland — so a headed
+run under `cage` looks for an X display, and what happens next depends on
+whether `cage` was built with XWayland:
+
+- **With XWayland** (the nixpkgs default) `cage` provides a `DISPLAY` for
+  legacy clients, and headed Chromium works unchanged. XWayland is a
+  Wayland-native compatibility layer running inside the compositor — not the
+  forwarded X11 channel this epic deletes, and not on the ssh path at all.
+- **Without it**, headed Chromium fails to start outright. It does *not*
+  quietly fall back to headless.
+
+Which of those holds on this box is a question for the machine, not for this
+document — it is step 3.2 of the runbook (`headed-run env | grep DISPLAY`).
+
+The durable fix is on the fixture side, telling Chromium to use Wayland
+directly:
 
 ```ts
 launchOptions: {
@@ -113,9 +131,14 @@ launchOptions: {
 }
 ```
 
-That snippet lives in `paulgsc/some-ui`, not this repo; until it lands there,
-`headed-run` still gives the browser a valid display and Chromium will fall
-back to its own headless path rather than failing.
+That snippet belongs in `paulgsc/some-ui`, not this repo, and is the follow-up
+to this change.
+
+**This is the one place where the epic leaves a live edge.** Every other
+consumer in the S1 inventory was proven not to need X11; the headed test path
+is the one that genuinely did, and its replacement depends either on XWayland
+being present or on a change in another repository. Verify it before merging —
+if step 3.2 shows no `DISPLAY`, land the fixture flags first.
 
 ## S4 — the dev servers were never forwarded
 
@@ -172,7 +195,13 @@ after reconnecting. Full step-by-step walkthrough:
 - [ ] **(e) Clipboard still works** — re-run the
       [OSC52 matrix](./clipboard-osc52.md); it must not have regressed, since
       #15 is what made #16 possible.
-- [ ] **(f) Headed tests** — `headed-run pnpm exec playwright test --headed`
+- [ ] **(f1) The compositor starts** — `headed-run wayland-info | head -20`
+      lists Wayland globals. Do this before any test suite: it separates
+      "`headed-run` is broken" from "the tests fail".
+- [ ] **(f2) Is there an XWayland display?** — `headed-run env | grep DISPLAY`.
+      This decides whether headed Chromium works today or needs the Ozone flags
+      in `some-ui` first. See [the live edge](#the-live-edge-chromium-does-not-pick-wayland-on-its-own).
+- [ ] **(f3) Headed tests** — `headed-run pnpm exec playwright test --headed`
       in `~/dev/some-ui` runs against a real compositor rather than silently
       falling back to headless.
 - [ ] **(g) Escape hatch** — from WSL, `waypipe ssh nixos.local <gui-app>`

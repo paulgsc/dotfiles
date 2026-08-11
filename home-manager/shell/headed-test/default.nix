@@ -52,7 +52,7 @@
       [ -n "$scratch" ] && ${pkgs.coreutils}/bin/rm -rf "$scratch"
       return 0
     }
-    trap cleanup EXIT INT TERM
+    trap cleanup EXIT
 
     # headless backend: software rendering into memory, no DRM node, no seat.
     # NO_DEVICES stops libinput from hunting for keyboards/mice that a
@@ -65,10 +65,33 @@
     #
     # Deliberately not `exec`: the socket directory above has to be cleaned up
     # after cage returns, and exec would replace this shell and drop the trap.
-    # The status is forwarded by hand so a failing test suite still fails the
-    # caller — `set -e` would otherwise kill us before cleanup runs.
+    #
+    # Backgrounded and explicitly waited on rather than run in the foreground,
+    # so that termination can be relayed.  bash defers a trap until the current
+    # foreground command finishes, so a SIGTERM aimed at this wrapper alone —
+    # job cancellation, a supervisor killing the pid, anything that is not a
+    # terminal Ctrl-C hitting the whole process group — would otherwise be
+    # queued while cage, the browser and the test suite all kept running.  That
+    # is precisely the command-scoped lifetime this wrapper exists to promise.
+    ${pkgs.cage}/bin/cage -- "$@" &
+    compositor=$!
+
+    relay() {
+      kill -"$1" "$compositor" 2>/dev/null || :
+    }
+    trap 'relay TERM' TERM
+    trap 'relay INT' INT
+
+    # `wait` is interruptible: a trapped signal makes it return >128 while cage
+    # is still shutting down, so loop until the child is genuinely reaped and
+    # its real status is in hand.
     status=0
-    ${pkgs.cage}/bin/cage -- "$@" || status=$?
+    while :; do
+      if wait "$compositor"; then status=0; else status=$?; fi
+      kill -0 "$compositor" 2>/dev/null || break
+    done
+
+    trap - TERM INT
     exit "$status"
   '';
 in {
