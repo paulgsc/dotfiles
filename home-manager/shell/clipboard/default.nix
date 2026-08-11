@@ -16,7 +16,12 @@
     spool=$(${pkgs.coreutils}/bin/mktemp "''${TMPDIR:-/tmp}/wclip.XXXXXXXXXX")
     trap '${pkgs.coreutils}/bin/rm -f "$spool"' EXIT INT TERM
 
-    ${pkgs.coreutils}/bin/tee "$spool"
+    # -p (--output-error=warn-nopipe) keeps tee alive when the downstream
+    # reader exits early — `cmd | wclip | head -1`, quitting `less`, etc.
+    # Without it tee dies on SIGPIPE mid-stream and, under `set -e`, the
+    # copy never happens: the spool is truncated and the OSC52 write below
+    # is never reached.  Copying is the job; passthrough is the courtesy.
+    ${pkgs.coreutils}/bin/tee -p "$spool"
     b64=$(${pkgs.coreutils}/bin/base64 <"$spool" | ${pkgs.coreutils}/bin/tr -d '\n')
 
     if [ -n "''${TMUX:-}" ]; then
