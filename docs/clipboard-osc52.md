@@ -15,9 +15,10 @@ WAYLANDIA-CLIP epic: [#15](https://github.com/paulgsc/dotfiles/issues/15).
 | CLI pipes (`pocket query`, etc.) | `home-manager/shell/clipboard` (`wclip`) | [#20](https://github.com/paulgsc/dotfiles/issues/20) |
 | System package                   | `xclip` removed from `nixos/development` | [#21](https://github.com/paulgsc/dotfiles/issues/21) |
 
-`X11Forwarding` itself is **not** removed here — that's gated on the
-WAYLANDIA-GUI epic ([#16](https://github.com/paulgsc/dotfiles/issues/16)) and
-is out of scope for this epic.
+`X11Forwarding` itself is **not** removed here — that was gated on the
+WAYLANDIA-GUI epic ([#16](https://github.com/paulgsc/dotfiles/issues/16)),
+which has since landed: forwarding is off and `xauth`/`xhost` are gone. See
+[docs/remote-gui-wayland.md](./remote-gui-wayland.md).
 
 ---
 
@@ -69,7 +70,9 @@ With `xclip` uninstalled and `$DISPLAY` unset, over **plain `ssh`** (no `-Y`):
 - [ ] **(b) again, after reconnect** — `tmux detach`, `tmux attach`, repeat the copy-mode yank.
 
 This is the acceptance gate for [#22](https://github.com/paulgsc/dotfiles/issues/22)
-and, transitively, the hard prerequisite for dropping `X11Forwarding` in #16.
+and was the hard prerequisite for dropping `X11Forwarding` in #16 — so re-run it
+after that change too, to confirm the clipboard did not quietly depend on the
+channel that got deleted.
 It has to be run against your real WSL ⇄ remote topology — nothing in CI can
 exercise the Windows-clipboard side of this chain.
 
