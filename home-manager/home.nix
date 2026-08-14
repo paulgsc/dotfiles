@@ -20,6 +20,7 @@
     ./shell/disk
     ./shell/clipboard
     ./shell/docker
+    ./shell/headed-test
   ];
 
   home = {

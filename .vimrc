@@ -68,9 +68,31 @@ function! s:OSC52Yank(text) abort
   call writefile([seq], '/dev/tty', 'b')
 endfunction
 
+" Is there a real clipboard provider behind "+ / "*?  With no $DISPLAY there
+" is not, and vim's adjust_clip_reg() silently rewrites "+ and "* to the
+" unnamed register before the yank, so TextYankPost reports regname '' and a
+" guard testing for '+' never fires — `"+yy` looks like it works and copies
+" nothing.  (A vim built -clipboard is no better: "+ is E354 and never yanks.)
+" When no provider exists, treat an ordinary yank as the clipboard yank; set
+" g:osc52_yank_unnamed = 0 before this loads to opt out.
+" Mirrors pkgs/vim/default.nix.  WAYLANDIA-GUI #16.
+let s:osc52_provider =
+      \ has('clipboard') && (!empty($DISPLAY) || !empty($WAYLAND_DISPLAY))
+let g:osc52_yank_unnamed = get(g:, 'osc52_yank_unnamed', !s:osc52_provider)
+
+function! s:OSC52Wanted(event) abort
+  if a:event.operator !=# 'y'
+    return 0
+  endif
+  if a:event.regname ==# '+' || a:event.regname ==# '*'
+    return 1
+  endif
+  return g:osc52_yank_unnamed && a:event.regname ==# ''
+endfunction
+
 augroup osc52_yank
   autocmd!
-  autocmd TextYankPost * if v:event.operator ==# 'y' && (v:event.regname ==# '+' || v:event.regname ==# '*')
+  autocmd TextYankPost * if s:OSC52Wanted(v:event)
         \ | call s:OSC52Yank(getreg(v:event.regname))
         \ | endif
 augroup END

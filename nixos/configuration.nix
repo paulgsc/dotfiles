@@ -14,7 +14,7 @@
 
     # Custom opinionated modules
     ./development
-    ./ssh-x11
+    ./remote-gui
     ./bootloader-cleanup
     ./ports
     ./port-configuration

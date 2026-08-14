@@ -88,7 +88,16 @@
         # ────────────────────────────────
         set -g set-clipboard on
         set -g allow-passthrough on
-        set -as terminal-overrides ',*:Ms=\E]52;c;%p1%s\007'
+        # Ms takes TWO parameters: %p1 is the selection ("c", "s0", …) and %p2
+        # is the base64 payload.  This used to read `Ms=\E]52;c;%p1%s\007`,
+        # which pinned the selection but then interpolated the *selection* as
+        # the payload and never emitted %p2 at all — tmux, handed two args for
+        # a one-arg capability, emitted nothing whatsoever and copy-mode yanks
+        # silently never reached the terminal.  Verified: with the old string
+        # tmux writes no OSC52 at all; with this one it writes the sequence and
+        # the payload round-trips.  Both parameters must be consumed, in order
+        # — `Ms=\E]52;c;%p2%s\007` is equally silent.
+        set -as terminal-overrides ',*:Ms=\E]52;%p1%s;%p2%s\007'
         bind-key -T copy-mode-vi y send-keys -X copy-selection-and-cancel
         bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-selection-and-cancel
   '';
