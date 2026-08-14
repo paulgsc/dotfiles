@@ -62,9 +62,11 @@
     # hyperfine
 
     # Node
+    # The `nodePackages` set was removed from nixpkgs in 2026-03; what
+    # survived moved to the top level under the same names.
     nodejs_latest
-    nodePackages.pnpm
-    nodePackages.prettier
+    pnpm
+    prettier
 
     # Development Error Analysis Tools
     cargo-errors
@@ -77,7 +79,7 @@
 
     # DB
     sqlite
-    nodePackages.sql-formatter
+    sql-formatter
 
     # typst toolkit
     typst

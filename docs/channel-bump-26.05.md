@@ -42,6 +42,25 @@ old spelling still resolves.
 | `services.xserver.desktopManager.gnome.*` → `services.desktopManager.gnome.*` | `nixos/configuration.nix` | Renamed. Alias resolves but warns |
 | `hardware.pulseaudio` → `services.pulseaudio` | `nixos/configuration.nix` | Renamed. GDM additionally warns that PulseAudio + GDM support is removed in 26.11 — we set it `false`, so nothing to do later |
 
+### Package attributes that were renamed or removed
+
+Module options are only half the surface. The `pkgs` attribute set moves too,
+and a removed attribute is a hard eval failure, not a warning — nixpkgs
+converts old aliases into `throw`s a release or two after the rename.
+
+| Attribute | Now | Where it bit |
+| --- | --- | --- |
+| `vim_configurable` | `vim-full` (`.customize` unchanged — still `vimUtils.makeCustomizable`) | `pkgs/vim/default.nix` |
+| `du-dust` | `dust` | `home-manager/shell/disk` |
+| `nodePackages.pnpm` · `nodePackages.prettier` · `nodePackages.sql-formatter` | `pnpm` · `prettier` · `sql-formatter` — the whole `nodePackages` set was removed in March 2026; survivors moved to the top level | `home-manager/home.nix` |
+
+This class is worth auditing mechanically rather than by reading, because
+nothing warns first: cross-reference every identifier in the repo's `.nix`
+files against the `= throw` entries in `pkgs/top-level/aliases.nix` at the
+target revision. Three of the eight name collisions that turns up here were
+real (`vim_configurable`, `du-dust`, `nodePackages`); the rest were ordinary
+words that happen to collide — `python`, `blackbox`, `callPackage`.
+
 ### Changes behaviour, no config change needed
 
 | Change | Effect here |

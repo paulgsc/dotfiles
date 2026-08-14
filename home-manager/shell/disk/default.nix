@@ -107,7 +107,7 @@
 in {
   home.packages = [
     # Interactive disk inspectors
-    pkgs.du-dust # `dust` — tree view of what's big
+    pkgs.dust # tree view of what's big (was `du-dust` before 25.11)
     pkgs.ncdu # `ncdu` — interactive ncurses disk usage
     pkgs.duf # `duf` — friendly df
 
