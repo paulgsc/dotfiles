@@ -65,10 +65,28 @@ waypipe ssh nixos.local <gui-app>
 ```
 
 `waypipe` is *installed* on the remote (`nixos/remote-gui`) rather than merely
-written down here, so the escape hatch works the day it is needed instead of
+written down here, so that half works the day it is needed instead of
 requiring a rebuild first. It is strictly better than what it replaces: no
 listening socket, no `MIT-MAGIC-COOKIE` file on disk, and it forwards one
 application rather than granting a channel to the whole session.
+
+**`waypipe` has to exist on both ends**, and this repo does not manage the WSL
+distro's packages — `wsl/` carries only `.wslconfig`, which is Windows-side
+WSL2 configuration. So the client half is a manual one-time step:
+
+```bash
+# in WSL
+sudo apt install waypipe
+echo "$WAYLAND_DISPLAY"      # must be non-empty, or WSLg is not running
+```
+
+Check the two versions agree before debugging anything else — `waypipe
+--version` on each side. waypipe was rewritten between the 0.8.x C
+implementation and the 0.10.x Rust one, and a distro package several releases
+behind what nixpkgs pins is a plausible source of a connection that opens and
+then does nothing. If they diverge, pin the remote's `waypipe` in
+`nixos/remote-gui` to match the client rather than chasing it from the WSL
+side.
 
 Why not keep `ssh -Y` for this? Because `-Y` is *trusted* forwarding — it
 disables the X security extension, so any program on the remote can read your
