@@ -157,19 +157,46 @@ Home-manager, after the reboot:
 $ home-manager switch --flake .#paulg@nixos
 ```
 
-### One CI caveat, inherited not introduced
+### The gate, and the three steps behind it that don't work
 
-The `check` job is red on `main` today, and was before this change: the
-`check formatting` step fails on four files that predate this epic
-(`nixos/hardware-configuration.nix`, `nixos/filesystems.nix`,
-`nixos/ports/default.nix`, `overlays/default.nix`), which skips the `deadnix`
-and `statix` steps behind it. `statix` and `deadnix` have their own standing
-findings across the repo.
+The steps this epic gates on pass on 26.05, and they run before the lint
+steps, so the result is readable:
 
-The steps this epic actually gates on — `nix flake check`, the NixOS toplevel
-build and the home-manager activation build — pass, and run *before* the lint
-steps, so the gate is readable. Cleaning up the lint debt is worth its own PR;
-doing it here would have buried a channel bump under a repo-wide reformat.
+| Step | 25.05 | 26.05 |
+| --- | --- | --- |
+| `stateVersion` guardrail | — | pass |
+| `nix flake check` | pass | pass |
+| build NixOS toplevel | pass | pass |
+| build home-manager activation | pass | pass |
+| `check formatting` | **fail** | **fail** |
+| `deadnix` / `statix` | skipped | skipped |
+
+The `check` job has been red on `main` for months, and the reason is not what
+it looks like. The step runs bare `nix fmt`, with no path — so alejandra gets
+no file argument, falls back to formatting **stdin**, and dies on the empty
+stream:
+
+```
+Formatting stdin.
+Failed! 1 error found at:
+- <anonymous file on stdin>: unexpected end of file
+```
+
+It has therefore never checked a single file, and the `git diff --exit-code`
+behind it has never had anything to diff. The failure also skips `deadnix`
+and `statix`, so those have never run either.
+
+Fixing it is not a one-liner, which is why it isn't in this PR:
+`nix fmt .` makes the step do its job, and then it fails honestly on four
+files that were never formatted (`nixos/hardware-configuration.nix`,
+`nixos/filesystems.nix`, `nixos/ports/default.nix`, `overlays/default.nix`),
+and `deadnix` and `statix` start running and fail on standing findings across
+the repo — unused module arguments, `W20` repeated attribute keys in
+`nixos/configuration.nix` and `hardware-configuration.nix`, `W03`/`W04`
+assignments that want `inherit`. That is a repo-wide cleanup with its own
+reviewable diff; burying it inside a channel bump would make both harder to
+read. Every file touched by this PR is alejandra-, deadnix- and
+statix-clean already.
 
 ## S5 — validation matrix
 
