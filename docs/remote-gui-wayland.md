@@ -194,7 +194,12 @@ after reconnecting. Full step-by-step walkthrough:
       preview, browse `http://nixos.local:3141` from Windows.
 - [ ] **(e) Clipboard still works** — re-run the
       [OSC52 matrix](./clipboard-osc52.md); it must not have regressed, since
-      #15 is what made #16 possible.
+      #15 is what made #16 possible. Manual verification of this epic found
+      two latent bugs here — vim's `"+` register has no provider without
+      `$DISPLAY`, and the tmux `Ms` capability was malformed so tmux emitted
+      nothing at all. Both are fixed on this branch; the write-up is in
+      [that doc](./clipboard-osc52.md#why-yy-is-not-the-ergonomic). Note the
+      behaviour change: in vim, a plain `yy` now copies to Windows.
 - [ ] **(f1) The compositor starts** — `headed-run wayland-info | head -20`
       lists Wayland globals. Do this before any test suite: it separates
       "`headed-run` is broken" from "the tests fail".
