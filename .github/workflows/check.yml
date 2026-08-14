@@ -17,6 +17,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # stateVersion guardrail (WAYLANDIA-SESSION #17/#31).
+      #
+      # nixos/state-version-guard already fails the *eval* if stateVersion
+      # drifts, which catches it locally before a rebuild.  This step is the
+      # second key: it keeps the expected values in a different file, so a
+      # change that edits the pin and its own assertion together still has to
+      # come here — where a reviewer reads it — to get green.  It runs before
+      # nix so a bump that forgot the rule fails in seconds, not minutes.
+      - name: stateVersion guardrail
+        run: |
+          fail=0
+          grep -qE '^\s*system\.stateVersion = "23\.11";' nixos/configuration.nix || {
+            echo "::error file=nixos/configuration.nix::system.stateVersion moved off 23.11"
+            fail=1
+          }
+          grep -qE '^\s*home\.stateVersion = "23\.05";' home-manager/home.nix || {
+            echo "::error file=home-manager/home.nix::home.stateVersion moved off 23.05"
+            fail=1
+          }
+          if [ "$fail" -ne 0 ]; then
+            echo "stateVersion records the release this machine's state was laid down by."
+            echo "A channel bump must not move it — see docs/channel-bump-26.05.md."
+            exit 1
+          fi
+
       - uses: DeterminateSystems/nix-installer-action@v14
 
       # Transparent binary cache — avoids rebuilding what nixpkgs already provides

@@ -134,5 +134,21 @@
   };
 
   # https://nixos.wiki/wiki/FAQ/When_do_I_update_stateVersion
+  #
+  # Home-manager's half of the pin — same rule as nixos/state-version-guard,
+  # and the reason the 26.05 release notes' "State Version Changes" section
+  # (zsh dotDir, xdg.userDirs, firefox configPath, neovim plugin defaults …)
+  # is inert here: every one of those is gated on stateVersion >= 26.05.
+  # WAYLANDIA-SESSION #17/#31.
   home.stateVersion = "23.05";
+
+  assertions = [
+    {
+      assertion = config.home.stateVersion == "23.05";
+      message = ''
+        home.stateVersion moved off "23.05".  A channel bump must not touch it;
+        see nixos/state-version-guard for why.
+      '';
+    }
+  ];
 }
