@@ -2,14 +2,20 @@
   description = "Your new nix config";
   inputs = {
     # Nixpkgs
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-25.05";
+    #
+    # 26.05, not 25.05: 25.05 went end-of-life in mid-2025 and stopped
+    # receiving security backports, and 25.11 followed it in mid-2026.  Both
+    # inputs move together — home-manager's release branches track a nixpkgs
+    # release and its modules are only tested against that one.
+    # WAYLANDIA-SESSION #17/#30; see docs/channel-bump-26.05.md.
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-26.05";
     # To enable pkgs.unstable.<pkg>, uncomment the line below and run `nix flake update`.
     # Then add outputs.overlays.unstable-packages back to the overlays lists in this file
     # and in nixos/configuration.nix.  See overlays/default.nix for the overlay definition.
     # nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
 
     # Home manager
-    home-manager.url = "github:nix-community/home-manager/release-25.05";
+    home-manager.url = "github:nix-community/home-manager/release-26.05";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
   };
 
