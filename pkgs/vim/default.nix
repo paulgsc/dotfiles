@@ -320,7 +320,10 @@
     gruvbox-material
   ];
 in
-  pkgs.vim_configurable.customize {
+  # `vim_configurable` became `vim-full` in nixpkgs; the old attribute is a
+  # throw as of 25.11.  `.customize` is unchanged — vim-full is still built
+  # through `vimUtils.makeCustomizable`.  WAYLANDIA-SESSION #17/#29.
+  pkgs.vim-full.customize {
     name = "vim";
     vimrcConfig = {
       customRC = customRC;

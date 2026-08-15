@@ -15,6 +15,7 @@
     # Custom opinionated modules
     ./development
     ./remote-gui
+    ./state-version-guard
     ./bootloader-cleanup
     ./ports
     ./port-configuration
@@ -57,15 +58,33 @@
     LC_TIME = "en_US.UTF-8";
   };
 
-  # Enable the X11 windowing system.
-  services.xserver.enable = true;
   virtualisation.docker.enable = true;
 
-  # Enable the GNOME Desktop Environment.
-  services.xserver.displayManager.gdm.enable = true;
-  services.xserver.desktopManager.gnome.enable = true;
+  # GNOME on Wayland.  WAYLANDIA-SESSION #17/#28; rationale in
+  # docs/wayland-session.md.
+  #
+  # There is no longer an X11 alternative to weigh: GNOME 49 (NixOS 25.11)
+  # deleted the X11 session upstream, and on 26.05
+  # `services.displayManager.gdm.wayland` is a *removed* option — "Disabling
+  # this option is no longer supported with GNOME 50".  So the session type
+  # was decided for us; what this config still gets to choose is whether to
+  # keep an Xorg server around, and it does not.
+  #
+  # `services.xserver.enable` is gone with the same change.  It built an X
+  # server that can host no session on a box with no monitor.  X11 *apps* are
+  # unaffected: mutter is built with `-Dxwayland_path=${xwayland}`, so
+  # Xwayland ships with the compositor, not with Xorg.
+  #
+  # Both option paths also moved out of `services.xserver` upstream (aliases
+  # still resolve on 26.05, but warn).
+  services.displayManager.gdm.enable = true;
+  services.desktopManager.gnome.enable = true;
 
-  # Configure keymap in X11
+  # Keymap.  These stay under `services.xserver` even with no X server: GDM
+  # sets `services.displayManager.enable`, which turns on the internal
+  # `services.graphical-desktop` module, which renders the xkb settings into
+  # /etc/X11/xorg.conf.d/00-keyboard.conf — the file localectl reads and GNOME
+  # follows for the Wayland session and the greeter.
   services.xserver = {
     xkb.layout = "us";
     xkb.variant = "";
@@ -76,7 +95,11 @@
 
   # Enable sound with pipewire.
   # sound.enable = true;
-  hardware.pulseaudio.enable = false;
+  #
+  # `hardware.pulseaudio` was renamed to `services.pulseaudio`; the alias
+  # still resolves on 26.05 but warns.  Keeping it `false` also keeps GDM
+  # quiet — GDM warns that PulseAudio support will be removed in 26.11.
+  services.pulseaudio.enable = false;
   security.rtkit.enable = true;
   services.pipewire = {
     enable = true;
@@ -189,5 +212,12 @@
   # this value at the release version of the first install of this system.
   # Before changing this value read the documentation for this option
   # (e.g. man configuration.nix or on https://nixos.org/nixos/options.html).
+  #
+  # It does NOT move with the channel.  A release bump changes which nixpkgs
+  # this machine builds from; stateVersion records which release its *state*
+  # was laid down by, and rewriting it is a data migration wearing a one-line
+  # diff.  ./state-version-guard fails the eval if this line drifts, and
+  # .github/workflows/check.yml holds the same value in a second file.
+  # WAYLANDIA-SESSION #17/#31.
   system.stateVersion = "23.11"; # Did you read the comment?
 }
