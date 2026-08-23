@@ -43,8 +43,9 @@ It reports:
 - **Compose projects** (`docker compose ls`)
 - **Disk usage** (`docker system df`): images, containers, volumes, build
   cache
-- **Prune candidates**: dangling images, stopped containers, unused
-  volumes
+- **Prune candidates**: dangling images, unused images (tagged + dangling —
+  the figure that actually matches `docker system df`'s RECLAIMABLE
+  column), stopped containers, unused volumes
 - A **"what to do next"** footer pointing at `lazydocker` / `ctop` / `dive`
   / `docker-reap`
 
@@ -73,10 +74,23 @@ prune as a separate, labeled stage rather than one opaque
 
 ```bash
 docker-reap                       # stopped containers, dangling images, unused networks
+docker-reap --images              # ...but prune ALL unused images, not just dangling ones
 docker-reap --volumes             # ...and unused volumes
 docker-reap --cache               # ...and the entire build cache
-docker-reap --all -y              # everything, non-interactive
+docker-reap --all -y              # everything (including --images), non-interactive
 ```
+
+By default, image pruning only removes *dangling* images (untagged
+`<none>:<none>` layers left behind by rebuilds). It's common for
+`docker system df` to report a large RECLAIMABLE size with zero dangling
+images — that space is sitting in tagged images that simply aren't used
+by any container (`ACTIVE=0`). Plain `docker image prune` intentionally
+leaves those alone since it can't tell "stale" from "kept around on
+purpose." Pass `--images` (or `--all`) to run `docker image prune -a`
+instead, which removes every image not referenced by a container,
+tagged or not — that's the flag that actually reclaims that space.
+`docker-doctor` flags this case explicitly when dangling count is lower
+than the total unused-image count.
 
 Build cache is opt-in (`--cache` / `--all`) and separated out on purpose:
 it's usually the largest and slowest part to prune (potentially 100+ GB
