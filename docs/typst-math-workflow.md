@@ -117,9 +117,10 @@ No NixOS-level change is needed — the port rule already exists.
 
 Checked in an isolated sandbox against the exact pinned versions
 (`tinymist` v0.14.18, `ale@2a3af30f`, `typst-vim@1d5436c`,
-`vim-vsnip@9bcfabe`, real headless Chromium) but **not** against the real
-NixOS host, its firewall, or an actual Windows browser — those need a run
-on the real machine:
+`vim-vsnip@9bcfabe`, real headless Chromium, and a real PTY-driven
+interactive Vim session for the timing-sensitive checks) but **not**
+against the real NixOS host, its firewall, or an actual Windows browser —
+those need a run on the real machine:
 
 - [x] Typst filetype/syntax/indent load from `typst-vim` alone.
 - [x] `ale#linter#Get('typst')` includes `tinymist` after sourcing
@@ -137,13 +138,27 @@ on the real machine:
       live-render content (headless Chromium, WebSocket observed, SVG
       content present, zero console/network errors).
 - [x] A port conflict produces a hard, observable failure rather than a
-      false "still running" status.
+      false "still running" status (`:TypstPreviewStatus` reports
+      `failed`).
+- [x] Leaving the exercise buffer for another buffer does not stop the
+      preview; starting the same entrypoint twice is a no-op; `VimLeavePre`
+      stops the owned preview job.
+- [x] `:TypstLiveWriteToggle`, under a real interactive Vim session with
+      realistic per-keystroke timing: a burst of typing produces exactly
+      one `:update` after the configured quiet interval (not one per
+      keystroke), the buffer becomes unmodified, and the file on disk
+      matches what was typed.
 - [ ] **Needs the real host:** `http://nixos.local:3141` reachable from
       the actual Windows browser over the LAN (firewall + mDNS + real
       network path — nothing in a sandbox can stand in for this).
 - [ ] **Needs the real host:** `ss -ltnp | grep 3141` after
       `home-manager switch`, to confirm the address actually bound matches
       what's configured.
+- [ ] **Needs the real host:** `nix build .#vim-custom` / `nix flake
+      check` — no `nix` binary was available in the sandbox this was
+      built in, so the Nix expression itself (adding two plugins, adding
+      one `source ${./.}/typst.vim` line) was reviewed but never actually
+      built.
 - [ ] **Open user decision:** literal PDF output was not requested and is
       not implemented. The live web preview is being treated as satisfying
       "PDF preview" for this first slice (Tinymist's own docs recommend
