@@ -22,6 +22,10 @@
 " E746 rejects a dotted function name defined outside its matching
 " autoload/ path).
 function! s:GetProjectRoot(buffer) abort
+  " ale#path#FindNearestDirectory() returns the match with a trailing slash
+  " (".../.git/"), so a single ':h' only strips that slash and still lands
+  " on the .git directory itself -- it takes two to reach the repo root.
+  " Confirmed directly: fnamemodify('/x/.git/', ':h') == '/x/.git'.
   let l:git_dir = ale#path#FindNearestDirectory(a:buffer, '.git')
 
   if !empty(l:git_dir)
@@ -56,6 +60,7 @@ let s:preview = {
       \ 'status': 'stopped',
       \ 'last_error': '',
       \ 'stopping': 0,
+      \ 'pending_restart': 0,
       \ }
 
 function! s:PreviewAddress() abort
@@ -85,6 +90,17 @@ function! s:OnPreviewExit(job, status) abort
   endif
   let s:preview.job = v:null
   let s:preview.stopping = 0
+
+  " job_stop() only requests termination; the OS reaps the process and this
+  " callback fires asynchronously, later. A restart that started the
+  " replacement immediately after calling stop -- rather than waiting for
+  " this callback -- would let the old job's belated exit stomp the new
+  " job's state (or lose the port race against it). So :TypstPreviewRestart
+  " defers its start to here, once the old process is confirmed gone.
+  if s:preview.pending_restart
+    let s:preview.pending_restart = 0
+    call TypstPreviewStart()
+  endif
 endfunction
 
 function! s:IsTypstBuffer() abort
@@ -130,6 +146,7 @@ function! TypstPreviewStart() abort
 endfunction
 
 function! TypstPreviewStop() abort
+  let s:preview.pending_restart = 0
   if s:preview.job isnot v:null && job_status(s:preview.job) ==# 'run'
     let s:preview.stopping = 1
     call job_stop(s:preview.job, 'term')
@@ -141,8 +158,12 @@ function! TypstPreviewStop() abort
 endfunction
 
 function! TypstPreviewRestart() abort
-  call TypstPreviewStop()
-  call TypstPreviewStart()
+  if s:preview.job isnot v:null && job_status(s:preview.job) ==# 'run'
+    call TypstPreviewStop()
+    let s:preview.pending_restart = 1
+  else
+    call TypstPreviewStart()
+  endif
 endfunction
 
 function! TypstPreviewStatus() abort
@@ -185,13 +206,26 @@ augroup END
 " silently rewritten because live-write was left on in a previous session).
 let g:typst_live_write_quiet_ms = get(g:, 'typst_live_write_quiet_ms', 700)
 
-function! s:LiveWriteTick(timer) abort
-  if !exists('b:typst_live_write') || !b:typst_live_write
+" Bound to the buffer that scheduled it (via the Funcref partial below), not
+" read from "the current buffer" -- a timer callback runs in whatever
+" buffer/window is current when it fires, which is not necessarily the one
+" that was being edited 700ms ago. Acting on b:/&modified/:update directly
+" here would silently check or save the wrong buffer if the user switched
+" away during the quiet interval.
+function! s:LiveWriteTick(bufnr, timer) abort
+  if !bufloaded(a:bufnr) || !getbufvar(a:bufnr, 'typst_live_write', 0)
     return
   endif
 
-  if &modified && !&readonly && &buftype ==# '' && !empty(bufname('%'))
-    update
+  let l:modified = getbufvar(a:bufnr, '&modified')
+  let l:readonly = getbufvar(a:bufnr, '&readonly')
+  let l:buftype = getbufvar(a:bufnr, '&buftype')
+
+  if l:modified && !l:readonly && l:buftype ==# '' && !empty(bufname(a:bufnr))
+    let l:winid = bufwinid(a:bufnr)
+    if l:winid != -1
+      call win_execute(l:winid, 'update')
+    endif
   endif
 endfunction
 
@@ -204,7 +238,9 @@ function! s:LiveWriteSchedule() abort
     call timer_stop(b:typst_live_write_timer)
   endif
 
-  let b:typst_live_write_timer = timer_start(g:typst_live_write_quiet_ms, function('s:LiveWriteTick'))
+  let b:typst_live_write_timer = timer_start(
+        \ g:typst_live_write_quiet_ms,
+        \ function('s:LiveWriteTick', [bufnr('%')]))
 endfunction
 
 function! TypstLiveWriteToggle() abort
