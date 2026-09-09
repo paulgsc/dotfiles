@@ -234,6 +234,19 @@ command! TypstPreviewOpen call TypstPreviewOpen()
 
 augroup typst_preview_lifecycle
   autocmd!
+  " `tinymist preview` watches the entry file with `notify::RecommendedWatcher`
+  " (inotify on Linux), which tracks a specific inode/watch descriptor, not a
+  " path. Vim's default 'backupcopy' is "auto", which on a normal writable
+  " file goes through the rename-based safe-write strategy: write a new
+  " file, then rename it over the original -- this replaces the inode at
+  " that path on every :w. Tinymist's own watcher source documents its
+  " rename/remove recovery as "untested and quite probably buggy"; forcing
+  " 'backupcopy=yes' makes Vim copy-then-overwrite-in-place instead, so the
+  " saved file keeps the same inode across every write and the watch never
+  " needs to be re-established. Buffer-local and Typst-only: this is a
+  " workaround for an external watcher's inode tracking, not a general
+  " editor preference.
+  autocmd FileType typst setlocal backupcopy=yes
   autocmd FileType typst call TypstPreviewStart(1)
   autocmd VimLeavePre * call TypstPreviewStop()
 augroup END

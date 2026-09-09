@@ -157,11 +157,43 @@ those need a run on the real machine:
 - [ ] **Needs the real host:** `ss -ltnp | grep 3141` after
       `home-manager switch`, to confirm the address actually bound matches
       what's configured.
-- [ ] **Needs the real host:** `nix build .#vim-custom` / `nix flake
-      check` — no `nix` binary was available in the sandbox this was
-      built in, so the Nix expression itself (adding two plugins, adding
-      one `source ${./.}/typst.vim` line) was reviewed but never actually
-      built.
+- [x] `nix build .#vim-custom` / `nix flake check` — no `nix` binary was
+      available in the sandbox this was originally built in, but the
+      repository's own `nix flake check + build` GitHub Actions workflow
+      has since run this exact Nix expression (the two added plugins, the
+      `source ${./.}/typst.vim` line) against the pinned nixpkgs and
+      passed on PR #43's head.
+- [ ] **Needs the real host — reported broken:** repeated hot-reload after
+      the first save. A real-machine report says the preview compiles once
+      but does not visibly update on subsequent `:w` saves of the same
+      entry. `tinymist preview` is a genuine long-lived filesystem watcher
+      (confirmed against its `v0.14.18` source: `WatchService::run()`
+      compiles once, then loops on filesystem interrupts via
+      `notify::RecommendedWatcher`), so a static render is not expected
+      behavior — but that same source documents its rename/remove watch
+      recovery as "untested and quite probably buggy," and Vim's default
+      `'backupcopy'` ("auto") can replace the saved file's inode via a
+      rename-based write depending on the heuristic Vim's build picks for
+      a given file/filesystem, which a `notify`-based watch can lose track
+      of. `typst_preview_lifecycle` now forces `setlocal backupcopy=yes`
+      for Typst buffers (copy-then-overwrite-in-place, never rename) to
+      remove that ambiguity outright. This could **not** be confirmed as
+      the actual cause in the sandbox available here: on this sandbox's
+      filesystem, plain `'auto'` already preserved the inode across a save
+      for a simple single-link file, so the failure mode this fix targets
+      never reproduced here to be falsified either way. The real host's
+      Vim build and filesystem may make a different heuristic choice.
+      **Needs, on the real host:** confirm `:setlocal backupcopy?` reads
+      `yes` for a Typst buffer, then perform at least two direct `:w`
+      saves with visibly different content and confirm the browser
+      updates after each one (not just the first). If the browser still
+      doesn't update, capture `tinymist preview`'s own stderr across both
+      saves (run it directly from a terminal, outside Vim, to rule out the
+      Vim lifecycle code entirely) to see whether a filesystem event and a
+      recompile are actually being logged for the second save — that
+      isolates a watcher-level failure from a browser/WebSocket-transport
+      one, which would need a different fix (e.g. `--data-plane-host`
+      instead of the deprecated `--host`).
 - [ ] **Open user decision:** literal PDF output was not requested and is
       not implemented. The live web preview is being treated as satisfying
       "PDF preview" for this first slice (Tinymist's own docs recommend
