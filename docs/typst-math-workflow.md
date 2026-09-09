@@ -42,7 +42,10 @@ the file *on disk*. Two things make that actively counterproductive:
 
 - `:TypstPreviewStart` — start once for the current buffer's entrypoint if
   not already running; a no-op if it's already running for that same file.
-  Also runs automatically on `FileType typst` for a saved buffer.
+  Also runs automatically on `FileType typst`, but the automatic call is
+  quiet about the two cases that are routine rather than errors: an
+  unsaved new buffer, or a different entry already running a preview.
+  Only an explicit `:TypstPreviewStart` reports those with an error.
 - `:TypstPreviewStop` — stop the owned preview job.
 - `:TypstPreviewRestart` — explicit stop+start, for recovery.
 - `:TypstPreviewStatus` — entrypoint, job state, address, last error line.

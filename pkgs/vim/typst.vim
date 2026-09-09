@@ -136,7 +136,16 @@ function! s:StartForEntry(entry) abort
         \ })
 endfunction
 
-function! TypstPreviewStart() abort
+" a:1 (optional): 1 when called from the FileType autocmd rather than a
+" direct :TypstPreviewStart. The autocmd fires for every saved-or-not .typ
+" buffer a user merely opens -- a brand-new unsaved exercise, or a second
+" file opened just to read it while a different entry's preview is already
+" running. Neither is a user request to start (or switch) a preview, so
+" those two cases must stay quiet there; only an explicit invocation should
+" ever echoerr about them.
+function! TypstPreviewStart(...) abort
+  let l:auto = get(a:, 1, 0)
+
   if !s:IsTypstBuffer()
     echoerr 'Not a Typst buffer.'
     return
@@ -145,6 +154,9 @@ function! TypstPreviewStart() abort
   let l:entry = expand('%:p')
 
   if !filereadable(l:entry)
+    if l:auto
+      return
+    endif
     echoerr 'Save this buffer before starting the preview (Tinymist previews a saved file, not an unsaved buffer).'
     return
   endif
@@ -161,6 +173,10 @@ function! TypstPreviewStart() abort
   if s:preview.status =~# '^\(starting\|listening\)$'
     if s:preview.entry ==# l:entry
       echom 'Typst preview already running for ' . l:entry . ' at http://' . s:preview.address . '/'
+      return
+    endif
+
+    if l:auto
       return
     endif
 
@@ -218,7 +234,7 @@ command! TypstPreviewOpen call TypstPreviewOpen()
 
 augroup typst_preview_lifecycle
   autocmd!
-  autocmd FileType typst call TypstPreviewStart()
+  autocmd FileType typst call TypstPreviewStart(1)
   autocmd VimLeavePre * call TypstPreviewStop()
 augroup END
 
@@ -276,10 +292,15 @@ function! s:LiveWriteTick(bufnr, timer) abort
           " prefixed on :execute itself -- `noautocmd hide execute '...'`
           " does not propagate either modifier into the command the
           " string builds and still throws E37 here; confirmed directly.
-          execute 'noautocmd hide buffer' a:bufnr
+          " `keepalt` on both switches keeps this borrow invisible to
+          " window navigation too -- without it, restoring the original
+          " buffer would leave the hidden Typst buffer as the window's
+          " new alternate file (`:b#`/<C-^>), clobbering whatever the
+          " user actually had there before this ran.
+          execute 'keepalt noautocmd hide buffer' a:bufnr
           update
         finally
-          execute 'noautocmd hide buffer' l:original
+          execute 'keepalt noautocmd hide buffer' l:original
         endtry
       endif
     endif
