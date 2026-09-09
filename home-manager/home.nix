@@ -1,9 +1,6 @@
 # This is your home-manager configuration file
 # Use this to configure your home environment (it replaces ~/.config/nixpkgs/home.nix)
 {
-  inputs,
-  outputs,
-  lib,
   config,
   pkgs,
   ...
@@ -102,37 +99,39 @@
   programs.home-manager.enable = true;
 
   # Nicely reload system units when changing configs
-  systemd.user.startServices = "sd-switch";
+  systemd.user = {
+    startServices = "sd-switch";
 
-  systemd.user.services.hm-garbage-collector = {
-    Unit = {
-      Description = "Cleanup old Home Manager generations";
+    services.hm-garbage-collector = {
+      Unit = {
+        Description = "Cleanup old Home Manager generations";
+      };
+      Service = {
+        Type = "oneshot";
+        # RETENTION POLICY: 30 days (matches nixos/bootloader-cleanup).
+        # Logs /nix/store size before/after so `journalctl --user -u hm-garbage-collector`
+        # shows whether GC actually reclaimed anything.
+        ExecStart = let
+          gc = pkgs.writeShellScript "hm-gc.sh" ''
+            before=$(${pkgs.coreutils}/bin/du -sb /nix/store 2>/dev/null | ${pkgs.coreutils}/bin/cut -f1 || echo 0)
+            ${pkgs.home-manager}/bin/home-manager expire-generations "-30 days"
+            ${pkgs.nix}/bin/nix-collect-garbage
+            after=$(${pkgs.coreutils}/bin/du -sb /nix/store 2>/dev/null | ${pkgs.coreutils}/bin/cut -f1 || echo 0)
+            reclaimed=$(( ''${before:-0} - ''${after:-0} ))
+            echo "hm-gc: /nix/store $(${pkgs.coreutils}/bin/numfmt --to=iec ''${before:-0}) -> $(${pkgs.coreutils}/bin/numfmt --to=iec ''${after:-0}) (reclaimed $(${pkgs.coreutils}/bin/numfmt --to=iec ''${reclaimed#-}))"
+          '';
+        in "${gc}";
+      };
     };
-    Service = {
-      Type = "oneshot";
-      # RETENTION POLICY: 30 days (matches nixos/bootloader-cleanup).
-      # Logs /nix/store size before/after so `journalctl --user -u hm-garbage-collector`
-      # shows whether GC actually reclaimed anything.
-      ExecStart = let
-        gc = pkgs.writeShellScript "hm-gc.sh" ''
-          before=$(${pkgs.coreutils}/bin/du -sb /nix/store 2>/dev/null | ${pkgs.coreutils}/bin/cut -f1 || echo 0)
-          ${pkgs.home-manager}/bin/home-manager expire-generations "-30 days"
-          ${pkgs.nix}/bin/nix-collect-garbage
-          after=$(${pkgs.coreutils}/bin/du -sb /nix/store 2>/dev/null | ${pkgs.coreutils}/bin/cut -f1 || echo 0)
-          reclaimed=$(( ''${before:-0} - ''${after:-0} ))
-          echo "hm-gc: /nix/store $(${pkgs.coreutils}/bin/numfmt --to=iec ''${before:-0}) -> $(${pkgs.coreutils}/bin/numfmt --to=iec ''${after:-0}) (reclaimed $(${pkgs.coreutils}/bin/numfmt --to=iec ''${reclaimed#-}))"
-        '';
-      in "${gc}";
-    };
-  };
 
-  systemd.user.timers.hm-garbage-collector = {
-    Unit = {Description = "Weekly cleanup of Home Manager generations";};
-    Timer = {
-      OnCalendar = "weekly";
-      Persistent = true;
+    timers.hm-garbage-collector = {
+      Unit = {Description = "Weekly cleanup of Home Manager generations";};
+      Timer = {
+        OnCalendar = "weekly";
+        Persistent = true;
+      };
+      Install = {WantedBy = ["timers.target"];};
     };
-    Install = {WantedBy = ["timers.target"];};
   };
 
   # https://nixos.wiki/wiki/FAQ/When_do_I_update_stateVersion

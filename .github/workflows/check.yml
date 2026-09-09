@@ -60,11 +60,18 @@ jobs:
         run: nix build --no-link '.#homeConfigurations."paulg@nixos".activationPackage'
 
       # Format check: fail if any .nix file is not alejandra-canonical
+      #
+      # `nix fmt` with no path forwards zero arguments to alejandra, which
+      # then falls back to reading stdin -- and dies on the empty stream
+      # before this step's own git-diff check ever runs. `nix fmt .` passes
+      # the repo root through instead, so alejandra actually walks the tree.
+      # See docs/channel-bump-26.05.md and commit e409933 for how this was
+      # diagnosed.
       - name: check formatting
         run: |
-          nix fmt
+          nix fmt .
           git diff --exit-code -- '*.nix' || {
-            echo "Nix files are not formatted. Run 'nix fmt' locally."
+            echo "Nix files are not formatted. Run 'nix fmt .' locally."
             exit 1
           }
 

@@ -6,11 +6,10 @@
   # This one contains whatever you want to overlay
   # You can change versions, add patches, set compilation flags, anything really.
   # https://nixos.wiki/wiki/Overlays
-  modifications = final: prev: {
-	
-	# vim-custom = prev.vim-custom.override {
-	  # Add any vim overrides
-	# };
+  modifications = _final: _prev: {
+    # vim-custom = prev.vim-custom.override {
+    # Add any vim overrides
+    # };
   };
 
   # DORMANT: this overlay is defined but NOT applied anywhere until nixpkgs-unstable
@@ -22,7 +21,7 @@
   # After that, pkgs.unstable.<name> becomes available everywhere.
   unstable-packages = final: _prev: {
     unstable = import inputs.nixpkgs-unstable {
-      system = final.system;
+      inherit (final) system;
       config.allowUnfree = true;
     };
   };

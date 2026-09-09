@@ -326,7 +326,7 @@ in
   pkgs.vim-full.customize {
     name = "vim";
     vimrcConfig = {
-      customRC = customRC;
+      inherit customRC;
       packages.myVimPackage = {
         start = plugins;
         opt = [];

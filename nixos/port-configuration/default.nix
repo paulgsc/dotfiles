@@ -1,8 +1,4 @@
-{
-  config,
-  pkgs,
-  ...
-}: {
+_: {
   # Enable the managed ports system
   networking.managedPorts = {
     enable = true;

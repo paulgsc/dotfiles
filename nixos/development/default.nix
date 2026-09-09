@@ -1,8 +1,4 @@
-{
-  config,
-  pkgs,
-  ...
-}: {
+{pkgs, ...}: {
   # Additional development packages beyond the vanilla set
   environment.systemPackages = with pkgs; [
     # Add more development tools here as you customize

@@ -1,7 +1,6 @@
 {
   lib,
   config,
-  pkgs,
   ...
 }:
 with lib; let
@@ -33,7 +32,7 @@ with lib; let
   # A logic gate: A subdomain is only "active" if:
   # 1. The subdomain itself is enabled.
   # 2. It isn't tied to a systemd service, OR the tied service is enabled.
-  hostActive = name: hostCfg:
+  hostActive = _name: hostCfg:
     hostCfg.enable && (hostCfg.service == null || serviceEnabled hostCfg.service);
 
   # RENDERER: renderCaddy
@@ -95,7 +94,7 @@ in {
 
     # The 'hosts' attribute set where the user defines their subdomains.
     hosts = mkOption {
-      type = types.attrsOf (types.submodule ({name, ...}: {
+      type = types.attrsOf (types.submodule (_: {
         options = {
           enable = mkEnableOption "Enable this specific subdomain";
 
