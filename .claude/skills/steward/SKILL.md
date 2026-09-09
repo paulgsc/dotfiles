@@ -109,16 +109,3 @@ an unaddressed _fixable_ finding, and confirm Claude Approvals is passing or not
 — then merge without pausing to ask again. After merging: verify the linked issue (if any)
 actually closed, then unsubscribe from PR activity and cancel any standing check-in
 trigger for it.
-
-## Known pre-existing CI issues on this repo
-
-The `check formatting` step in `nix flake check + build` (`.github/workflows/check.yml`)
-runs bare `nix fmt` with no path argument, so `alejandra` falls back to reading stdin,
-gets EOF immediately, and fails before ever checking a file — documented in commit
-`e409933` on `main`, confirmed still failing identically on `main`'s own scheduled runs.
-This is not any PR's fault; don't treat it as this-PR-specific CI red, and don't try to
-fix it inside an unrelated PR (it needs a `nix fmt .` fix plus cleanup of four pre-existing
-unformatted files and standing `deadnix`/`statix` findings — a repo-wide diff of its own).
-Post the standing-down comment once per PR per the parent instructions' CI-red rule, then
-treat `nix flake check`, the NixOS toplevel build, and the home-manager activation build —
-the three steps that actually run before this one — as the real signal.
