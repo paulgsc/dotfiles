@@ -72,6 +72,18 @@ endfunction
 " lifetime). Readiness and failure must therefore be read from err_cb, not
 " out_cb.
 function! s:OnPreviewErr(channel, msg) abort
+  " A job's stderr can be buffered and delivered after we've already
+  " decided it's gone -- job_stop() only requests termination, and Vim
+  " may still flush queued channel output afterward, possibly after a
+  " replacement job has already started. Identify the message by the
+  " channel it actually came from rather than trusting "a job is
+  " currently tracked": a stale message from a dead job must not
+  " overwrite state that a live one (or the intentional stopped/starting
+  " state) already owns.
+  if s:preview.job is v:null || job_getchannel(s:preview.job) != a:channel
+    return
+  endif
+
   let s:preview.last_error = a:msg
 
   if a:msg =~# 'Static file server listening on'
@@ -240,6 +252,25 @@ function! s:LiveWriteTick(bufnr, timer) abort
     let l:winid = get(win_findbuf(a:bufnr), 0, -1)
     if l:winid != -1
       call win_execute(l:winid, 'update')
+    else
+      " Loaded but displayed nowhere at all (e.g. :hide'd, or 'hidden' is
+      " set and the user moved on without closing it) -- win_findbuf()
+      " can't find a window to run :update in because there isn't one.
+      " Borrow the current window just long enough to write it, with
+      " :noautocmd so this doesn't fire FileType/Buf-Enter/Leave for
+      " either buffer or trigger this same live-write machinery
+      " recursively, and restore the original buffer afterward either way.
+      let l:original = bufnr('%')
+      if l:original ==# a:bufnr
+        update
+      else
+        try
+          noautocmd execute 'buffer' a:bufnr
+          update
+        finally
+          noautocmd execute 'buffer' l:original
+        endtry
+      endif
     endif
   endif
 endfunction
