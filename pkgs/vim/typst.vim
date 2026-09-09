@@ -60,7 +60,7 @@ let s:preview = {
       \ 'status': 'stopped',
       \ 'last_error': '',
       \ 'stopping': 0,
-      \ 'pending_restart': 0,
+      \ 'pending_start': '',
       \ }
 
 function! s:PreviewAddress() abort
@@ -92,19 +92,36 @@ function! s:OnPreviewExit(job, status) abort
   let s:preview.stopping = 0
 
   " job_stop() only requests termination; the OS reaps the process and this
-  " callback fires asynchronously, later. A restart that started the
-  " replacement immediately after calling stop -- rather than waiting for
-  " this callback -- would let the old job's belated exit stomp the new
-  " job's state (or lose the port race against it). So :TypstPreviewRestart
-  " defers its start to here, once the old process is confirmed gone.
-  if s:preview.pending_restart
-    let s:preview.pending_restart = 0
-    call TypstPreviewStart()
+  " callback fires asynchronously, later. Any start requested while a stop
+  " was still in flight -- via :TypstPreviewRestart, or plain :TypstPreviewStop
+  " immediately followed by :TypstPreviewStart -- gets queued in
+  " pending_start (by TypstPreviewStart itself, see below) instead of
+  " racing the old job's belated exit. The entrypoint is captured at
+  " request time, not re-resolved from "whatever buffer is current" once
+  " this callback finally runs.
+  if !empty(s:preview.pending_start)
+    let l:target = s:preview.pending_start
+    let s:preview.pending_start = ''
+    call s:StartForEntry(l:target)
   endif
 endfunction
 
 function! s:IsTypstBuffer() abort
   return &filetype ==# 'typst' && !empty(expand('%:p'))
+endfunction
+
+function! s:StartForEntry(entry) abort
+  let s:preview.entry = a:entry
+  let s:preview.address = s:PreviewAddress()
+  let s:preview.status = 'starting'
+  let s:preview.last_error = ''
+
+  let s:preview.job = job_start(
+        \ ['tinymist', 'preview', '--host', s:preview.address, '--no-open', a:entry],
+        \ {
+        \   'err_cb': function('s:OnPreviewErr'),
+        \   'exit_cb': function('s:OnPreviewExit'),
+        \ })
 endfunction
 
 function! TypstPreviewStart() abort
@@ -120,6 +137,15 @@ function! TypstPreviewStart() abort
     return
   endif
 
+  if s:preview.stopping
+    " A previous job is still exiting (job_stop() only requests
+    " termination, asynchronously). Queue this entry rather than racing
+    " the old job's belated exit_cb for s:preview state and the port;
+    " s:OnPreviewExit starts it once that job is confirmed gone.
+    let s:preview.pending_start = l:entry
+    return
+  endif
+
   if s:preview.status =~# '^\(starting\|listening\)$'
     if s:preview.entry ==# l:entry
       echom 'Typst preview already running for ' . l:entry . ' at http://' . s:preview.address . '/'
@@ -131,22 +157,11 @@ function! TypstPreviewStart() abort
     return
   endif
 
-  let s:preview.entry = l:entry
-  let s:preview.address = s:PreviewAddress()
-  let s:preview.status = 'starting'
-  let s:preview.last_error = ''
-  let s:preview.stopping = 0
-
-  let s:preview.job = job_start(
-        \ ['tinymist', 'preview', '--host', s:preview.address, '--no-open', l:entry],
-        \ {
-        \   'err_cb': function('s:OnPreviewErr'),
-        \   'exit_cb': function('s:OnPreviewExit'),
-        \ })
+  call s:StartForEntry(l:entry)
 endfunction
 
 function! TypstPreviewStop() abort
-  let s:preview.pending_restart = 0
+  let s:preview.pending_start = ''
   if s:preview.job isnot v:null && job_status(s:preview.job) ==# 'run'
     let s:preview.stopping = 1
     call job_stop(s:preview.job, 'term')
@@ -158,12 +173,8 @@ function! TypstPreviewStop() abort
 endfunction
 
 function! TypstPreviewRestart() abort
-  if s:preview.job isnot v:null && job_status(s:preview.job) ==# 'run'
-    call TypstPreviewStop()
-    let s:preview.pending_restart = 1
-  else
-    call TypstPreviewStart()
-  endif
+  call TypstPreviewStop()
+  call TypstPreviewStart()
 endfunction
 
 function! TypstPreviewStatus() abort
@@ -222,7 +233,11 @@ function! s:LiveWriteTick(bufnr, timer) abort
   let l:buftype = getbufvar(a:bufnr, '&buftype')
 
   if l:modified && !l:readonly && l:buftype ==# '' && !empty(bufname(a:bufnr))
-    let l:winid = bufwinid(a:bufnr)
+    " bufwinid() only searches the current tab page; win_findbuf() searches
+    " all of them, so a buffer left open in another tab during the quiet
+    " interval still gets its scheduled write instead of being silently
+    " skipped.
+    let l:winid = get(win_findbuf(a:bufnr), 0, -1)
     if l:winid != -1
       call win_execute(l:winid, 'update')
     endif
@@ -271,9 +286,12 @@ augroup END
 " LaTeX-compatibility layer or a stand-in for completion.
 let g:vsnip_snippet_dir = expand('<sfile>:h') . '/snippets'
 
-imap <expr> <C-j> vsnip#expandable()  ? '<Plug>(vsnip-expand)'         : '<C-j>'
-imap <expr> <C-l> vsnip#jumpable(1)   ? '<Plug>(vsnip-jump-next)'      : '<C-l>'
-smap <expr> <C-j> vsnip#expandable()  ? '<Plug>(vsnip-expand)'         : '<C-j>'
-smap <expr> <C-l> vsnip#jumpable(1)   ? '<Plug>(vsnip-jump-next)'      : '<C-l>'
-imap <expr> <C-h> vsnip#jumpable(-1)  ? '<Plug>(vsnip-jump-prev)'      : '<C-h>'
-smap <expr> <C-h> vsnip#jumpable(-1)  ? '<Plug>(vsnip-jump-prev)'      : '<C-h>'
+" <C-j> does both expand and next-placeholder (matching docs/typst-math-
+" workflow.md): try expand first, then forward-jump, else fall through to
+" a literal <C-j>. Previously only expand was wired to it and forward-jump
+" lived solely on the undocumented <C-l>, so <C-j> silently inserted a
+" newline mid-snippet instead of advancing.
+imap <expr> <C-j> vsnip#expandable()  ? '<Plug>(vsnip-expand)'    : vsnip#jumpable(1)  ? '<Plug>(vsnip-jump-next)' : '<C-j>'
+smap <expr> <C-j> vsnip#expandable()  ? '<Plug>(vsnip-expand)'    : vsnip#jumpable(1)  ? '<Plug>(vsnip-jump-next)' : '<C-j>'
+imap <expr> <C-h> vsnip#jumpable(-1)  ? '<Plug>(vsnip-jump-prev)' : '<C-h>'
+smap <expr> <C-h> vsnip#jumpable(-1)  ? '<Plug>(vsnip-jump-prev)' : '<C-h>'
