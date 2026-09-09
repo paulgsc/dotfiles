@@ -3,7 +3,6 @@
 # and in the NixOS manual (accessible by running ‘nixos-help’).
 {
   outputs,
-  config,
   pkgs,
   ...
 }: {
@@ -30,15 +29,23 @@
     ];
   };
 
-  networking.hostName = "nixos"; # Define your hostname.
-  # networking.wireless.enable = true;  # Enables wireless support via wpa_supplicant.
+  networking = {
+    hostName = "nixos"; # Define your hostname.
+    # wireless.enable = true;  # Enables wireless support via wpa_supplicant.
 
-  # Configure network proxy if necessary
-  # networking.proxy.default = "http://user:password@proxy:port/";
-  # networking.proxy.noProxy = "127.0.0.1,localhost,internal.domain";
+    # Configure network proxy if necessary
+    # proxy.default = "http://user:password@proxy:port/";
+    # proxy.noProxy = "127.0.0.1,localhost,internal.domain";
 
-  # Enable networking
-  networking.networkmanager.enable = true;
+    # Enable networking
+    networkmanager.enable = true;
+
+    # Open ports in the firewall.
+    # firewall.allowedTCPPorts = [ ... ];
+    # firewall.allowedUDPPorts = [ ... ];
+    # Or disable the firewall altogether.
+    firewall.enable = true;
+  };
 
   # Set your time zone.
   time.timeZone = "America/Los_Angeles";
@@ -77,41 +84,88 @@
   #
   # Both option paths also moved out of `services.xserver` upstream (aliases
   # still resolve on 26.05, but warn).
-  services.displayManager.gdm.enable = true;
-  services.desktopManager.gnome.enable = true;
-
-  # Keymap.  These stay under `services.xserver` even with no X server: GDM
-  # sets `services.displayManager.enable`, which turns on the internal
-  # `services.graphical-desktop` module, which renders the xkb settings into
-  # /etc/X11/xorg.conf.d/00-keyboard.conf — the file localectl reads and GNOME
-  # follows for the Wayland session and the greeter.
-  services.xserver = {
-    xkb.layout = "us";
-    xkb.variant = "";
-  };
-
-  # Enable CUPS to print documents.
-  services.printing.enable = true;
-
-  # Enable sound with pipewire.
-  # sound.enable = true;
   #
   # `hardware.pulseaudio` was renamed to `services.pulseaudio`; the alias
   # still resolves on 26.05 but warns.  Keeping it `false` also keeps GDM
-  # quiet — GDM warns that PulseAudio support will be removed in 26.11.
-  services.pulseaudio.enable = false;
+  # quiet — GDM warns that PulseAudio support will be removed in 26.11. Its
+  # replacement, pipewire, needs rtkit for realtime scheduling.
   security.rtkit.enable = true;
-  services.pipewire = {
-    enable = true;
-    alsa.enable = true;
-    alsa.support32Bit = true;
-    pulse.enable = true;
-    # If you want to use JACK applications, uncomment this
-    #jack.enable = true;
 
-    # use the example session manager (no others are packaged yet so this is enabled by default,
-    # no need to redefine it in your config for now)
-    #media-session.enable = true;
+  services = {
+    displayManager = {
+      gdm.enable = true;
+
+      # Auto-login: accepted risk — this machine lives behind a locked door and is
+      # not encrypted at rest.  If the threat model ever changes (shared space, laptop,
+      # sensitive data at rest) disable these two lines and enable screen-lock on idle.
+      # Full-disk encryption (LUKS) would require a clean reinstall; track in issue #4.
+      autoLogin.enable = true;
+      autoLogin.user = "paulg";
+    };
+
+    desktopManager.gnome.enable = true;
+
+    # Keymap.  These stay under `services.xserver` even with no X server: GDM
+    # sets `services.displayManager.enable`, which turns on the internal
+    # `services.graphical-desktop` module, which renders the xkb settings into
+    # /etc/X11/xorg.conf.d/00-keyboard.conf — the file localectl reads and GNOME
+    # follows for the Wayland session and the greeter.
+    xserver = {
+      xkb.layout = "us";
+      xkb.variant = "";
+    };
+
+    # Enable CUPS to print documents.
+    printing.enable = true;
+
+    # Enable sound with pipewire.
+    # sound.enable = true;
+    pulseaudio.enable = false;
+
+    pipewire = {
+      enable = true;
+      alsa.enable = true;
+      alsa.support32Bit = true;
+      pulse.enable = true;
+      # If you want to use JACK applications, uncomment this
+      #jack.enable = true;
+
+      # use the example session manager (no others are packaged yet so this is enabled by default,
+      # no need to redefine it in your config for now)
+      #media-session.enable = true;
+    };
+
+    # Enable the OpenSSH daemon.
+    openssh = {
+      enable = true;
+      settings = {
+        PasswordAuthentication = false;
+        PermitRootLogin = "no";
+        KbdInteractiveAuthentication = false;
+      };
+    };
+
+    # Enable mDNS
+    avahi = {
+      enable = true;
+      nssmdns4 = true;
+      publish.enable = true;
+      publish.addresses = true;
+      # publish.workstation = true;
+    };
+
+    subdomains = {
+      enable = true;
+      backend = "caddy";
+      baseDomain = "nixos.local";
+
+      hosts = {
+        "file_host" = {
+          enable = true;
+          proxyPass = "http://file_host:3000";
+        };
+      };
+    };
   };
 
   # Enable touchpad support (enabled default in most desktopManager).
@@ -129,13 +183,6 @@
       #  thunderbird
     ];
   };
-
-  # Auto-login: accepted risk — this machine lives behind a locked door and is
-  # not encrypted at rest.  If the threat model ever changes (shared space, laptop,
-  # sensitive data at rest) disable these two lines and enable screen-lock on idle.
-  # Full-disk encryption (LUKS) would require a clean reinstall; track in issue #4.
-  services.displayManager.autoLogin.enable = true;
-  services.displayManager.autoLogin.user = "paulg";
 
   # Workaround for GNOME autologin: https://github.com/NixOS/nixpkgs/issues/103746#issuecomment-945091229
   systemd.services."getty@tty1".enable = false;
@@ -165,46 +212,6 @@
   #   enable = true;
   #   enableSSHSupport = true;
   # };
-
-  # List services that you want to enable:
-
-  # Enable the OpenSSH daemon.
-  services.openssh = {
-    enable = true;
-    settings = {
-      PasswordAuthentication = false;
-      PermitRootLogin = "no";
-      KbdInteractiveAuthentication = false;
-    };
-  };
-
-  # Open ports in the firewall.
-  # networking.firewall.allowedTCPPorts = [ ... ];
-  # networking.firewall.allowedUDPPorts = [ ... ];
-  # Or disable the firewall altogether.
-  networking.firewall.enable = true;
-
-  # Enable mDNS
-  services.avahi = {
-    enable = true;
-    nssmdns4 = true;
-    publish.enable = true;
-    publish.addresses = true;
-    # publish.workstation = true;
-  };
-
-  services.subdomains = {
-    enable = true;
-    backend = "caddy";
-    baseDomain = "nixos.local";
-
-    hosts = {
-      "file_host" = {
-        enable = true;
-        proxyPass = "http://file_host:3000";
-      };
-    };
-  };
 
   # This value determines the NixOS release from which the default
   # settings for stateful data, like file locations and database versions

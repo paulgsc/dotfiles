@@ -1,4 +1,4 @@
-{ config, lib, pkgs, ... }: {
+{pkgs, ...}: {
   # Mount an external hard drive via sshfs (assuming it’s a remote system)
   # fileSystems."/mnt/storage" = {
   #   device = "your_wsl_username@nixos.local:/mnt/d"; # Change this to your remote system's location
@@ -27,4 +27,3 @@
     # sshfs
   ];
 }
-

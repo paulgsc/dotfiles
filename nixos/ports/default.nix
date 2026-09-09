@@ -155,27 +155,37 @@ with lib; let
   );
 
   portProtos = p:
-    if p.protocol == "both" then ["tcp" "udp"] else [p.protocol];
+    if p.protocol == "both"
+    then ["tcp" "udp"]
+    else [p.protocol];
 
   # LAN-scoped rules: -s <subnet> restricts by origin IP (not interface name)
   subnetRuleLines =
-    concatMapStrings (p:
-      concatMapStrings (subnet:
-        concatMapStrings (proto:
-          "iptables -A nixos-fw -s ${subnet} -p ${proto} --dport ${toString p.port} -j nixos-fw-accept\n"
-        ) (portProtos p)
-      ) p.srcSubnets
-    ) subnetScopedPorts;
+    concatMapStrings (
+      p:
+        concatMapStrings (
+          subnet:
+            concatMapStrings (
+              proto: "iptables -A nixos-fw -s ${subnet} -p ${proto} --dport ${toString p.port} -j nixos-fw-accept\n"
+            ) (portProtos p)
+        )
+        p.srcSubnets
+    )
+    subnetScopedPorts;
 
   # Interface-restricted rules using real interface names
   ifaceRuleLines =
-    concatMapStrings (p:
-      concatMapStrings (iface:
-        concatMapStrings (proto:
-          "iptables -A nixos-fw -i ${iface} -p ${proto} --dport ${toString p.port} -j nixos-fw-accept\n"
-        ) (portProtos p)
-      ) p.interfaces
-    ) ifaceScopedPorts;
+    concatMapStrings (
+      p:
+        concatMapStrings (
+          iface:
+            concatMapStrings (
+              proto: "iptables -A nixos-fw -i ${iface} -p ${proto} --dport ${toString p.port} -j nixos-fw-accept\n"
+            ) (portProtos p)
+        )
+        p.interfaces
+    )
+    ifaceScopedPorts;
 
   auditReport = pkgs.writeTextFile {
     name = "port-audit-report";
@@ -187,10 +197,10 @@ with lib; let
       ${concatMapStringsSep "\n" (p: ''
           - ${toString p.port}/${p.protocol}  ${p.service}: ${p.description}
             Owner: ${p.owner} | Last Used: ${p.lastUsed} | External: ${
-          if p.externalAccess
-          then "YES"
-          else "No"
-        }
+            if p.externalAccess
+            then "YES"
+            else "No"
+          }
         '')
         globalPorts}
 

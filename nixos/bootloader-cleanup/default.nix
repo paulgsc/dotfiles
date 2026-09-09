@@ -1,11 +1,6 @@
 # Safe bootloader and system cleanup configuration
 # Uses NixOS built-in mechanisms instead of custom scripts
-{
-  config,
-  pkgs,
-  lib,
-  ...
-}: {
+{pkgs, ...}: {
   # Bootloader configuration with built-in cleanup
   boot.loader = {
     systemd-boot = {

@@ -1,9 +1,4 @@
-{
-  config,
-  pkgs,
-  lib,
-  ...
-}: let
+_: let
   customTMUXConfig = ''
         # ────────────────────────────────
         # General
