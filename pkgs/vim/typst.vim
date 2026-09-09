@@ -260,15 +260,26 @@ function! s:LiveWriteTick(bufnr, timer) abort
       " :noautocmd so this doesn't fire FileType/Buf-Enter/Leave for
       " either buffer or trigger this same live-write machinery
       " recursively, and restore the original buffer afterward either way.
+      "
+      " The switch itself needs `hide`: with the default 'nohidden', a
+      " plain `:buffer` refuses to abandon the *current* window's buffer
+      " if that one is also modified (E37), which would silently drop
+      " the write we came here to do. `:hide {cmd}` runs {cmd} with
+      " 'hidden' in effect just for that command, so switching away
+      " (either direction) never requires saving anything.
       let l:original = bufnr('%')
       if l:original ==# a:bufnr
         update
       else
         try
-          noautocmd execute 'buffer' a:bufnr
+          " The modifiers must be part of the string :execute runs, not
+          " prefixed on :execute itself -- `noautocmd hide execute '...'`
+          " does not propagate either modifier into the command the
+          " string builds and still throws E37 here; confirmed directly.
+          execute 'noautocmd hide buffer' a:bufnr
           update
         finally
-          noautocmd execute 'buffer' l:original
+          execute 'noautocmd hide buffer' l:original
         endtry
       endif
     endif
