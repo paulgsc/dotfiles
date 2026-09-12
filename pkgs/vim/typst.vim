@@ -92,7 +92,17 @@ let s:preview = {
 " callback from a superseded generation must never mutate state a live one
 " already owns.
 function! s:OnPreviewErr(generation, channel, msg) abort
-  if a:generation != s:preview.generation
+  " The generation check alone only rejects a callback superseded by a
+  " *newer job having started* -- it does nothing once a stop has been
+  " requested for the still-current generation, since TypstPreviewStop()
+  " deliberately does not bump the generation (the real exit_cb for the
+  " job being stopped still needs to match it). So also reject once we've
+  " begun tearing this job down (a queued readiness/failure line must not
+  " flip 'stopping' back to 'listening'/'failed' out from under the
+  " pending exit) or once it's already confirmed gone (s:preview.job is
+  " cleared only by that exit callback; stderr can still be delivered
+  " after it runs).
+  if a:generation != s:preview.generation || s:preview.stopping || s:preview.job is v:null
     return
   endif
 
@@ -276,18 +286,23 @@ endfunction
 
 function! TypstPreviewStop() abort
   let s:preview.pending_start = ''
-  if s:preview.job isnot v:null && job_status(s:preview.job) ==# 'run'
-    " 'stopping', never 'stopped', until s:OnPreviewExit's callback
-    " actually confirms the process is gone -- job_stop() only requests
-    " termination and the port may still be held for some time after this
-    " returns.
+  if s:preview.job isnot v:null
+    " Route through 'stopping' and let s:OnPreviewExit be the sole place
+    " that ever sets 'stopped', regardless of what job_status() currently
+    " reads -- job_status() reporting non-'run' does NOT mean exit_cb has
+    " already fired for it (that callback is asynchronous and can still be
+    " pending); jumping straight to 'stopped' here previously left that
+    " pending callback's generation and s:preview.stopping both untouched,
+    " so when it later ran, it read stopping=0 and treated an intentional
+    " stop as an unexpected exit, overwriting the correct 'stopped' with
+    " 'failed'. job_stop() on an already-dead job is a harmless no-op.
     let s:preview.stopping = 1
     let s:preview.phase = 'stopping'
     call job_stop(s:preview.job, 'term')
   else
-    " No live job to stop (already stopped/failed, or job_start itself
-    " failed synchronously) -- there is nothing to wait on.
-    let s:preview.job = v:null
+    " No job object at all -- already fully stopped/failed previously, or
+    " job_start() itself failed synchronously -- so there is no pending
+    " callback left to wait on.
     let s:preview.entry = ''
     let s:preview.phase = 'stopped'
   endif
