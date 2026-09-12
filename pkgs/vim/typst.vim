@@ -525,7 +525,16 @@ command! TypstLiveWriteToggle call TypstLiveWriteToggle()
 augroup typst_live_write
   autocmd!
   autocmd TextChanged,TextChangedI *.typ call s:LiveWriteSchedule()
-  autocmd BufLeave *.typ call s:LiveWriteFlushAndCancel()
+  " `nested`: without it, the :update inside s:LiveWriteFlushAndCancel()
+  " runs nested inside this BufLeave autocmd's own execution, and Vim
+  " does not fire autocommands triggered from within another autocommand
+  " by default -- so BufWritePre/BufWritePost (ALE's g:ale_fix_on_save
+  " path among them) would silently never run for this write, even though
+  " the file itself still gets written. `nested` restores that: this
+  " flush then behaves like the timer-driven :update (a timer callback is
+  " not itself inside an autocmd, so it was never affected) and like a
+  " normal :w.
+  autocmd BufLeave *.typ nested call s:LiveWriteFlushAndCancel()
   autocmd BufUnload,BufDelete *.typ call s:LiveWriteCancelForBuffer(str2nr(expand('<abuf>')))
 augroup END
 
