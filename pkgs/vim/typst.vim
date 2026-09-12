@@ -73,20 +73,30 @@ call ale#linter#Define('typst', {
 let g:typst_preview_bind = get(g:, 'typst_preview_bind', '0.0.0.0:3141')
 let g:typst_preview_url = get(g:, 'typst_preview_url', 'http://nixos.local:3141/')
 
-" Guarded so re-sourcing this file (e.g. `:source $MYVIMRC` after editing
-" an unrelated mapping) does not blindly discard a live preview's state.
-" Script-local variables survive re-sourcing the same script; only the
-" first load should reset them. Without this guard, re-sourcing while a
-" preview is running would replace s:preview.job with a fresh v:null
-" *without ever stopping the actual process* -- it keeps running, still
-" holding the port, now completely untracked -- and would reset
-" generation back to 0, so a later start's generation could collide with
-" the orphaned job's still-pending callbacks (bound to whatever
-" generation they were at before the reset) and let a stale callback
-" mutate the new job's state, reintroducing exactly the class of bug
-" already fixed above for the normal (non-resourcing) case.
-if !exists('s:preview')
-  let s:preview = {
+" Backed by a GLOBAL, not a plain script-local: this file is sourced via
+" `source ${./.}/typst.vim` from pkgs/vim/default.nix, and `${./.}` is a
+" Nix store path that changes every time this package rebuilds (editing
+" typst.vim itself, or anything else in pkgs/vim/, changes the derivation
+" and therefore the path). A script-local variable is keyed to the exact
+" file PATH Vim sourced, not to "this logical config" -- so after any
+" rebuild, `:source $MYVIMRC` loads typst.vim from a genuinely new path,
+" gets a brand new script ID with its own empty script-local namespace,
+" and a plain `if !exists('s:preview')` guard there would still be false:
+" it would reinitialize fresh state and orphan whatever the previous
+" script instance's preview job still was, the same failure this guard
+" exists to prevent for a plain re-source, just via a different trigger.
+" A global survives regardless of which script instance touches it.
+" Vim dictionaries are reference types, so aliasing s:preview to it here
+" costs nothing: every `s:preview.foo = ...` elsewhere in this file (under
+" whichever script instance is currently active) mutates the one shared
+" object, and a still-pending callback bound to an *older* script
+" instance's function (Vim never unloads a previous instance's function
+" definitions just because a new one was sourced) keeps mutating that same
+" shared object too -- including the generation counter, so cross-
+" instance staleness rejection keeps working exactly as it does within a
+" single instance.
+if !exists('g:_typst_preview_state')
+  let g:_typst_preview_state = {
         \ 'job': v:null,
         \ 'generation': 0,
         \ 'entry': '',
@@ -100,6 +110,11 @@ if !exists('s:preview')
         \ 'pending_start': '',
         \ }
 endif
+
+" All code below reads/writes s:preview as before -- this is a live alias
+" to the same shared dictionary, rebound on every source (cheap: no copy),
+" not a fresh local state container.
+let s:preview = g:_typst_preview_state
 
 " Tinymist logs exclusively to stderr, not stdout (verified against the
 " tinymist v0.14.18 binary: stdout is empty for the whole process
