@@ -25,14 +25,24 @@
 " E746 rejects a dotted function name defined outside its matching
 " autoload/ path).
 function! s:GetProjectRoot(buffer) abort
-  " ale#path#FindNearestDirectory() returns the match with a trailing slash
-  " (".../.git/"), so a single ':h' only strips that slash and still lands
-  " on the .git directory itself -- it takes two to reach the repo root.
-  " Confirmed directly: fnamemodify('/x/.git/', ':h') == '/x/.git'.
-  let l:git_dir = ale#path#FindNearestDirectory(a:buffer, '.git')
+  " In a linked git worktree, '.git' at the worktree root is a plain FILE
+  " (containing a "gitdir: ..." pointer into the main repo's
+  " .git/worktrees/<name>), not a directory -- confirmed directly with a
+  " real `git worktree add`. ale#path#FindNearestDirectory() only matches
+  " directories, so it finds nothing there and this used to fall through
+  " to the buffer's own immediate directory as project root, breaking
+  " root-dependent behavior for anything not sitting right at the
+  " worktree's top level. ale#path#FindNearestFileOrDirectory() matches
+  " either shape, but the two return different formats (confirmed against
+  " the pinned ALE source): a matched directory gets a trailing slash
+  " appended, so ':h:h' is needed to reach the repository root (one ':h'
+  " only strips that trailing slash: fnamemodify('/x/.git/', ':h') ==
+  " '/x/.git'); a matched file has no trailing slash, so a single ':h'
+  " already reaches the worktree root.
+  let l:git_path = ale#path#FindNearestFileOrDirectory(a:buffer, '.git')
 
-  if !empty(l:git_dir)
-    return fnamemodify(l:git_dir, ':h:h')
+  if !empty(l:git_path)
+    return isdirectory(l:git_path) ? fnamemodify(l:git_path, ':h:h') : fnamemodify(l:git_path, ':h')
   endif
 
   return fnamemodify(bufname(a:buffer), ':p:h')
