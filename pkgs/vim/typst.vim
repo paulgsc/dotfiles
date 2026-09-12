@@ -254,6 +254,15 @@ function! s:MaybeStartForBuffer(bufnr, auto) abort
   endif
 
   if s:preview.stopping
+    " Merely opening another saved .typ file while a stop is in flight is
+    " not a request to start or switch previews either -- same principle
+    " as the "already running" branch below, just for the shutdown window
+    " instead of the running window. Only an explicit start/restart should
+    " ever queue a pending_start here; the auto path must stay quiet and
+    " let the stop actually finish stopping.
+    if a:auto
+      return
+    endif
     " A previous job is still exiting (job_stop() only requests
     " termination, asynchronously). Queue this entry rather than racing
     " the old job's belated exit_cb for s:preview state and the port;
