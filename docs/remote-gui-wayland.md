@@ -32,7 +32,7 @@ completely indifferent to this change.
 | --- | --- | --- | --- |
 | Storybook (`some-ui`) | `.bashrc` autostarts `pnpm storybook`; port 6006 in `nixos/port-configuration` | No — HTTP, binds `0.0.0.0`, `allowedHosts: nixos.local` | Web-forwarded, unaffected |
 | Vite previews | same project | No — HTTP | Web-forwarded, unaffected |
-| `tinymist` typst preview | `pkgs/vim/default.nix` → `--host nixos.local:3141`; port 3141 registered | No — HTTP over mDNS | Web-forwarded, unaffected |
+| `tinymist` typst preview | `pkgs/vim/typst.vim` (sourced from `pkgs/vim/default.nix`) → `--data-plane-host 0.0.0.0:3141`, browsed at `nixos.local:3141`; port 3141 registered | No — HTTP over mDNS | Web-forwarded, unaffected |
 | Grafana / Prometheus / Redis admin / Metabase | `nixos/port-configuration` | No — HTTP | Web-forwarded, unaffected |
 | Clipboard (tmux yank, vim `"+y`, CLI pipes) | `home-manager/shell/{tmux,clipboard}`, `pkgs/vim` | Not since #15 — OSC52 over the ssh TTY | Already migrated |
 | OBS audio capture | `obs/`, NATS to `nixos.local:4222` | No — runs client-side on Windows/WSL | Unaffected |
