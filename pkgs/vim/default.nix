@@ -96,80 +96,12 @@
     let g:ale_lint_on_enter = 0                 " don't lint on buffer open
     let g:ale_command_wrapper = 'nice -n 15'
 
-    " --- Typst HMR-like Preview for Vim ---
-    let s:typst_job     = v:null
-    let s:typst_file    = ""
-    let s:typst_timer   = v:null
-    let s:typst_debounce_ms = 500
-
-    function! s:IsTypBuffer() abort
-      return &filetype ==# 'typst' && expand('%:p') !=# ""
-    endfunction
-
-    " Callback for when the timer hits
-    function! s:OnTimerTrigger(timer_id) abort
-      call s:UpdatePreview()
-    endfunction
-
-    " Callback for job output
-    function! s:OnJobOut(ch, msg) abort
-      if a:msg =~# 'Listening'
-        echom "Typst Live: " . a:msg
-      endif
-    endfunction
-
-    " Callback for job errors
-    function! s:OnJobErr(ch, msg) abort
-      echom "Typst ERR: " . a:msg
-    endfunction
-
-    function! s:StopTypstPreview() abort
-      if s:typst_timer isnot v:null
-        call timer_stop(s:typst_timer)
-        let s:typst_timer = v:null
-      endif
-      if s:typst_job isnot v:null && job_status(s:typst_job) ==# 'run'
-        call job_stop(s:typst_job, 'term')
-      endif
-      let s:typst_job  = v:null
-      let s:typst_file = ""
-    endfunction
-
-    function! s:UpdatePreview(...) abort
-      let l:current_file = expand('%:p')
-      if empty(l:current_file) || !filereadable(l:current_file)
-        return
-      endif
-
-      if s:typst_job isnot v:null && job_status(s:typst_job) ==# 'run'
-        call job_stop(s:typst_job, 'term')
-      endif
-
-      let s:typst_file = l:current_file
-      let l:cmd = ['tinymist', 'preview', '--host', 'nixos.local:3141', '--no-open', s:typst_file]
-
-      let s:typst_job = job_start(l:cmd, {
-            \ 'out_cb': function('s:OnJobOut'),
-            \ 'err_cb': function('s:OnJobErr'),
-            \ 'exit_cb': {j,s -> execute('let s:typst_job = v:null')},
-            \ })
-    endfunction
-
-    function! s:DebouncedUpdate() abort
-      if !s:IsTypBuffer() | return | endif
-      if s:typst_timer isnot v:null
-        call timer_stop(s:typst_timer)
-      endif
-      let s:typst_timer = timer_start(s:typst_debounce_ms, function('s:OnTimerTrigger'))
-    endfunction
-
-    augroup typst_hmr
-      autocmd!
-      autocmd FileType typst call s:UpdatePreview()
-      autocmd TextChanged,TextChangedI *.typ call s:DebouncedUpdate()
-      autocmd BufWritePost *.typ call s:UpdatePreview()
-      autocmd VimLeavePre * call s:StopTypstPreview()
-    augroup END
+    " --- Typst authoring: ALE+Tinymist LSP, persistent preview, snippets ---
+    " See pkgs/vim/typst.vim and docs/typst-math-workflow.md. Sourced as its
+    " own file (not inlined here) so its script-local state gets its own
+    " script ID, and so the runtime logic stays reviewable/testable outside
+    " this generated vimrc string.
+    source ${./.}/typst.vim
 
     augroup slint_syntax
         autocmd!
@@ -318,6 +250,12 @@
     lightline-vim
     onedark-vim
     gruvbox-material
+
+    # Typst: filetype detection, syntax and indent (kaarmu/typst.vim). This
+    # is distinct from this repo's own pkgs/vim/typst.vim, sourced above,
+    # which owns the ALE/preview/snippet logic instead.
+    typst-vim
+    vim-vsnip
   ];
 in
   # `vim_configurable` became `vim-full` in nixpkgs; the old attribute is a

@@ -1,0 +1,72 @@
+{
+  "Inline equation": {
+    "prefix": "eqi",
+    "body": "\\$${1:x}\\$$0",
+    "description": "Inline Typst equation ($x$, no surrounding spaces)"
+  },
+  "Block equation": {
+    "prefix": "eqb",
+    "body": ["\\$ ${1:x} \\$", "$0"],
+    "description": "Block/display Typst equation ($ x $, spaced delimiters)"
+  },
+  "Fraction": {
+    "prefix": "frac",
+    "body": "(${1:a})/(${2:b})$0",
+    "description": "Fraction via Typst's division operator"
+  },
+  "Square root": {
+    "prefix": "sqrt",
+    "body": "sqrt(${1:x})$0",
+    "description": "Square root"
+  },
+  "Nth root": {
+    "prefix": "root",
+    "body": "root(${1:n}, ${2:x})$0",
+    "description": "Nth root"
+  },
+  "Sum with bounds": {
+    "prefix": "sum",
+    "body": "sum_(${1:i}=${2:1})^(${3:n}) ${4:a_i}$0",
+    "description": "Finite sum with bounds"
+  },
+  "Product with bounds": {
+    "prefix": "prod",
+    "body": "product_(${1:i}=${2:1})^(${3:n}) ${4:a_i}$0",
+    "description": "Finite product with bounds"
+  },
+  "Definite integral": {
+    "prefix": "int",
+    "body": "integral_(${1:a})^(${2:b}) ${3:f(x)} dif ${4:x}$0",
+    "description": "Definite integral with differential"
+  },
+  "Limit": {
+    "prefix": "lim",
+    "body": "lim_(${1:x} -> ${2:oo}) ${3:f(x)}$0",
+    "description": "Limit"
+  },
+  "Aligned derivation": {
+    "prefix": "align",
+    "body": ["\\$ ${1:a} &= ${2:b} \\", "  &= ${3:c} \\$", "$0"],
+    "description": "Aligned multi-step derivation/proof chain (block equation)"
+  },
+  "Cases": {
+    "prefix": "cases",
+    "body": [
+      "cases(",
+      "  ${1:a} & \"if\" ${2:condition},",
+      "  ${3:b} & \"otherwise\",",
+      ")$0"
+    ],
+    "description": "Piecewise cases"
+  },
+  "Matrix": {
+    "prefix": "mat",
+    "body": "mat(${1:1}, ${2:2}; ${3:3}, ${4:4})$0",
+    "description": "2x2 matrix (extend rows with ';', columns with ',')"
+  },
+  "Vector": {
+    "prefix": "vec",
+    "body": "vec(${1:1}, ${2:2}, ${3:3})$0",
+    "description": "Column vector"
+  }
+}

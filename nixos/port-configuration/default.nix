@@ -227,13 +227,13 @@ _: {
       }
 
       # ═══════════════════════════════════════════════════════════
-      # Typst live preview (localhost only)
+      # Typst live preview (LAN-restricted)
       # ═══════════════════════════════════════════════════════════
       {
         port = 3141;
         protocol = "tcp";
         service = "typst-preview";
-        description = "tinymist live-preview HTTP server (vim binds --host nixos.local:3141, browsed from LAN)";
+        description = "tinymist live-preview HTTP server (vim binds --data-plane-host nixos.local:3141, matching the browsed URL's host -- tinymist v0.14.18 validates the WebSocket Origin against the bind hostname itself, so a wildcard 0.0.0.0 bind here would make the preview page load but its WebSocket connection fail; this firewall rule still restricts LAN reachability regardless of bind host)";
         externalAccess = false;
         srcSubnets = ["10.0.0.0/24"];
       }
