@@ -66,8 +66,11 @@ One discoverable, tab-completable entry point:
   browser. Refuses (with an error) unless the phase is verified
   `listening`, reconciled the same way. Never tries to launch a remote
   GUI browser itself.
+- `logs` — opens a Vim terminal following tinymist's persisted stderr
+  live (`tail -F` on `g:typst_preview_log_file`) and echoes the exact log
+  path first, so it can equally be `tail -F`'d from an adjacent tmux pane.
 - `help` (also bare `:TypstPreview`, `-h`, `--help`) — the above in one
-  screen, plus the current phase/entry/bind/url.
+  screen, plus the current phase/entry/bind/url/log path.
 
 `:TypstPreviewStart`/`Stop`/`Restart`/`Status`/`Open` remain as thin
 compatibility aliases for the equivalent subcommand, but this document and
@@ -79,13 +82,19 @@ any new mappings should only teach the `:TypstPreview` form.
   autosave policy for every `.typ` file. See "Live-write: active-buffer
   only" below for what changed here and why.
 
-`g:typst_preview_bind` (default `'0.0.0.0:3141'`) and `g:typst_preview_url`
-(default `'http://nixos.local:3141/'`) are separate variables, overridable
-in a personal vimrc if ever needed: one is what Tinymist is told to listen
-on, the other is what the browser is told to visit, and neither is ever
-inferred from the other. The wildcard bind is safe specifically because
-`nixos/port-configuration/default.nix` restricts `3141/tcp` to the LAN
-subnet at the firewall — it is not a general recommendation.
+`g:typst_preview_bind` (default `'nixos.local:3141'`) and
+`g:typst_preview_url` (default `'http://nixos.local:3141/'`) are separate
+variables, overridable in a personal vimrc if ever needed: one is what
+Tinymist is told to listen on, the other is what the browser is told to
+visit, and neither is ever inferred from the other. They must, however,
+name the same host and port — see "Preview address" below for why — and
+`:TypstPreview start` validates that before ever spawning `tinymist`,
+refusing (loudly, on an explicit start; quietly into `last_error` on the
+automatic `FileType` trigger) a configuration that names different hosts.
+
+`nixos/port-configuration/default.nix` still restricts `3141/tcp` to the
+LAN subnet at the firewall; this is unrelated to the host used above and
+stays in place regardless of what `g:typst_preview_bind` is set to.
 
 Diagnostics come from ALE talking `textDocument/didChange` to `tinymist lsp`
 over stdio — independent of whether the preview is running, and independent
@@ -98,6 +107,29 @@ of whether the buffer has been saved.
 This replaced an earlier version of this integration that used `--host`
 deliberately; verified directly against the pinned v0.14.18 binary that
 the newer approach is strictly better:
+
+### Why `bind` and `url` must name the same host
+
+Confirmed directly against the pinned tinymist v0.14.18 source
+(`crates/tinymist/src/tool/preview/http.rs`, `is_valid_origin_impl`):
+every WebSocket upgrade request is checked against an *expected Origin*
+computed from `--data-plane-host`'s own hostname — not from the concrete
+address the OS actually bound, and not from the URL a browser visits. A
+plain `GET /` performs no such check, so an earlier version of this
+integration (bind `0.0.0.0:3141`, browse `http://nixos.local:3141/`) would
+serve the HTML shell and report `listening` normally, then silently fail
+the WebSocket upgrade the moment the page tried to connect — the frontend
+stayed permanently blank with no further symptom short of a browser
+network trace or tinymist's own stderr (`Connection with unexpected Origin
+header. Closing connection.`). `0.0.0.0` is not on tinymist's short list of
+exempt origins (`localhost`/`127.0.0.1`, VS Code webviews, Gitpod, a
+configured VS Code proxy URL); nothing LAN-hostname-shaped is. Keeping
+`g:typst_preview_bind`'s host equal to `g:typst_preview_url`'s host is
+what actually satisfies this pin, and `s:ValidatePreviewConfig()` in
+`typst.vim` enforces it before ever spawning `tinymist`. `err_cb` also
+recognizes that exact rejection string directly, in case some other
+override ever reintroduces it, and marks the preview `failed` rather than
+leaving it looking `listening`.
 
 - With no `--host` given, Tinymist's `static_file_host` (the frontend/
   WebSocket listener) defaults to the same address as `data_plane_host`
@@ -124,6 +156,29 @@ the newer approach is strictly better:
   false `listening` status; `:TypstPreview status`'s reconciliation
   against the live job additionally catches the case where the process
   dies for any other reason before that stderr line is even parsed.
+
+## Live tracing: `:TypstPreview logs`
+
+`err_cb` already receives every stderr line tinymist writes, for the
+lifecycle parsing above; it also appends each one, timestamped, to
+`g:typst_preview_log_file` (default `$XDG_STATE_HOME/tinymist-preview.log`,
+falling back to `~/.local/state/tinymist-preview.log` when
+`$XDG_STATE_HOME` is unset — the parent directory is created with `0700`
+permissions if missing). `:TypstPreview logs` opens a Vim terminal running
+`tail -F` on that file and echoes the exact path first, so the same file
+can be followed from an adjacent tmux pane instead if preferred.
+
+There is deliberately no `--log-filter` flag or `TINYMIST_LOG` variable
+wired into the `tinymist` invocation: confirmed directly against the
+pinned v0.14.18 source (`crates/tinymist/src/log.rs`) that neither exists
+at this pin — `InitLogOpts` is a fixed struct and per-module verbosity
+(`tinymist`, `tinymist_preview`, …) is hardcoded from it, not configurable
+from the CLI or environment. (Tinymist's own docs describe such a flag on
+a newer, unpinned revision; it does not apply here.) There is accordingly
+nothing to pass tinymist for this — the value here is purely in persisting
+and following the stream Vim was already receiving, without wrapping
+`tinymist` in a shell pipeline, which would break `job_stop()`'s signal
+delivery and `err_cb`'s line-by-line callback.
 
 ## Live-write: active-buffer only
 
@@ -194,13 +249,27 @@ those need a run on the real machine:
       comma`) against an in-memory, never-saved buffer via the real ALE
       engine, not just a raw LSP probe.
 - [x] `textDocument/completion` inside math returns `sqrt`/`square`.
-- [x] `:TypstPreview` dispatches `start`/`stop`/`restart`/`status`/`open`
-      correctly; bare `:TypstPreview`, `help`, `-h`, `--help` all print the
-      same usage; an unknown subcommand errors; tab completion lists all
-      six subcommands and filters correctly by prefix (`st` →
-      `start`/`stop`/`status`). The five `TypstPreview*` compatibility
-      aliases and `TypstLiveWriteToggle` are all still defined after
-      sourcing.
+- [x] `:TypstPreview` dispatches `start`/`stop`/`restart`/`status`/`open`/
+      `logs` correctly; bare `:TypstPreview`, `help`, `-h`, `--help` all
+      print the same usage; an unknown subcommand errors; tab completion
+      lists all seven subcommands and filters correctly by prefix (`st` →
+      `start`/`stop`/`status`). The six `TypstPreview*` compatibility
+      aliases (including the added `TypstPreviewLogs`) and
+      `TypstLiveWriteToggle` are all still defined after sourcing.
+- [x] Regression test for this exact class of bug: with
+      `g:typst_preview_bind` and `g:typst_preview_url` set to different
+      hosts (reproducing the original `0.0.0.0`-bind-vs-`nixos.local`-url
+      default) *before* the `FileType` autocmd fires, the automatic start
+      attempt is rejected by `s:ValidatePreviewConfig()` — `phase=failed`
+      with an explanatory `last_error`, no job ever spawned — without
+      raising a Vim error from inside the autocmd (which could otherwise
+      cut off another plugin's own `FileType typst` autocmd in the same
+      dispatch); an *explicit* `:TypstPreview start` with the same
+      mismatch does raise one. Setting both to the same host passes
+      validation and proceeds to the normal `job_start()` path. Verified
+      directly against the real `pkgs/vim/typst.vim` (autoload-stubbed
+      `ale#`/`vsnip#` functions, no real `tinymist` binary) rather than a
+      reimplementation.
 - [x] `vim-vsnip` finds snippets from both `g:vsnip_snippet_dirs` (this
       plugin's managed set) and a separately-configured `g:vsnip_snippet_dir`
       (simulating a user's own pre-existing snippet directory) at once —
@@ -251,11 +320,25 @@ those need a run on the real machine:
       background write reaching back into it, because it was already
       flushed at the moment it was left.
 - [ ] **Needs the real host:** `http://nixos.local:3141` reachable from
-      the actual Windows browser over the LAN (firewall + mDNS + real
-      network path — nothing in a sandbox can stand in for this).
+      the actual Windows browser over the LAN, *and* the WebSocket upgrade
+      itself reaching `101 Switching Protocols` with a visible document
+      render — not just the HTML shell loading (firewall + mDNS + real
+      network path — nothing in a sandbox can stand in for this). A real-
+      host report against an earlier `0.0.0.0`-bind default found exactly
+      the gap this distinction is for: the shell loaded, `status` said
+      `listening`, and the page stayed blank because the WebSocket upgrade
+      was failing tinymist's Origin check underneath — see "Why `bind` and
+      `url` must name the same host" above. Confirm both that this no
+      longer happens with `bind=url`-host `nixos.local`, and, as a
+      negative check, that `:TypstPreview logs` (or `status`) visibly
+      reports the old failure mode if `bind` is temporarily reset to
+      `0.0.0.0:3141`.
 - [ ] **Needs the real host:** `ss -ltnp | grep 3141` after
       `home-manager switch`, to confirm the address actually bound matches
-      what's configured.
+      what's configured, and specifically that binding literally to the
+      hostname `nixos.local` (rather than `0.0.0.0`) resolves to the LAN
+      interface at bind time and not to loopback — nothing in this sandbox
+      can exercise the host's actual mDNS/`nss-mdns` self-resolution.
 - [x] `nix build .#vim-custom` / `nix flake check` — no `nix` binary was
       available in the sandbox this was originally built in, but the
       repository's own `nix flake check + build` GitHub Actions workflow

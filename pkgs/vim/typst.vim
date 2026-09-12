@@ -66,12 +66,81 @@ call ale#linter#Define('typst', {
 "
 " `bind` (what Tinymist listens on) and `url` (what the browser is told to
 " visit) are deliberately separate variables, never one hostname reused for
-" both roles. A wildcard bind is safe here specifically because
+" both roles by inference -- but confirmed directly against the pinned
+" tinymist v0.14.18 source (crates/tinymist/src/tool/preview/http.rs,
+" is_valid_origin_impl): the WebSocket Origin it expects is derived from
+" *bind*'s hostname, not from the concrete OS-bound address or the URL, and
+" a browser visiting a different hostname than that sends an Origin header
+" tinymist rejects (it is not on the exception list: localhost/127.0.0.1,
+" vscode-webview, Gitpod, configured vscode-proxy -- nothing LAN-hostname-
+" shaped). The HTML shell still loads either way (plain GET / performs no
+" Origin check), so the preview looks "listening" while staying permanently
+" blank. A wildcard bind (0.0.0.0) used to be chosen here because
 " nixos/port-configuration/default.nix restricts 3141/tcp to the trusted
-" LAN subnet at the firewall -- this is not a general recommendation to
-" bind 0.0.0.0.
-let g:typst_preview_bind = get(g:, 'typst_preview_bind', '0.0.0.0:3141')
+" LAN subnet at the firewall -- that restriction is still in place, but
+" 0.0.0.0 as *bind*'s value is exactly what breaks the Origin check against
+" the nixos.local URL below, so bind must name the same host the browser
+" visits instead. s:ValidatePreviewConfig() enforces this pin-specific
+" host:port equality before ever spawning tinymist.
+let g:typst_preview_bind = get(g:, 'typst_preview_bind', 'nixos.local:3141')
 let g:typst_preview_url = get(g:, 'typst_preview_url', 'http://nixos.local:3141/')
+
+" --- Live tracing: persist tinymist's stderr, don't wrap the process -------
+" tinymist v0.14.18 has no --log-filter flag or TINYMIST_LOG variable --
+" confirmed directly against crates/tinymist/src/log.rs: InitLogOpts is a
+" fixed {is_transient_cmd, is_test_no_verbose, output} struct and module
+" verbosity (including tinymist_preview, which is what actually matters
+" here) is hardcoded from those, not configurable from the CLI. There is
+" therefore nothing to pass tinymist for this; what's missing is a place to
+" *see* the stream after the fact. s:OnPreviewErr already receives every
+" stderr line for lifecycle parsing; it also appends each one, timestamped,
+" to this file, so `:TypstPreview logs` can `tail -F` it live without
+" wrapping tinymist in a shell pipeline (which would break job_stop()'s
+" signal delivery and err_cb's line-by-line callback).
+let g:typst_preview_log_file = get(g:, 'typst_preview_log_file',
+      \ (exists('$XDG_STATE_HOME') && !empty($XDG_STATE_HOME)
+      \   ? $XDG_STATE_HOME : expand('$HOME/.local/state'))
+      \ . '/tinymist-preview.log')
+
+function! s:EnsureLogDir() abort
+  let l:dir = fnamemodify(g:typst_preview_log_file, ':h')
+  if !isdirectory(l:dir)
+    call mkdir(l:dir, 'p', 0700)
+  endif
+endfunction
+
+" host(bind) must equal host(url) (and, unless bind's port is the
+" OS-assigned 0, port(bind) must equal port(url)) for the reason explained
+" above g:typst_preview_bind. Returns an explanation string on mismatch, or
+" '' when compatible -- deliberately just this one equality, not a general
+" semver/compatibility policy.
+function! s:ValidatePreviewConfig(bind, url) abort
+  let l:bind_parts = matchlist(a:bind, '^\(.*\):\(\d\+\)$')
+  if empty(l:bind_parts)
+    return 'g:typst_preview_bind must be "host:port" (got ' . string(a:bind) . ')'
+  endif
+
+  let l:url_parts = matchlist(a:url, '^\w\+://\([^/:]\+\)\%(:\(\d\+\)\)\?')
+  if empty(l:url_parts)
+    return 'g:typst_preview_url must be a URL like "http://host:port/" (got ' . string(a:url) . ')'
+  endif
+
+  let [l:bind_host, l:bind_port] = [l:bind_parts[1], l:bind_parts[2]]
+  let [l:url_host, l:url_port] = [l:url_parts[1], empty(l:url_parts[2]) ? '80' : l:url_parts[2]]
+
+  if l:bind_host !=# l:url_host
+    return 'g:typst_preview_bind host (' . l:bind_host . ') must match g:typst_preview_url host ('
+          \ . l:url_host . ') -- tinymist v0.14.18 computes the WebSocket Origin it expects from the '
+          \ . 'bind hostname and rejects the upgrade when the browser''s Origin (from the URL you visit) differs'
+  endif
+
+  if l:bind_port !=# '0' && l:bind_port !=# l:url_port
+    return 'g:typst_preview_bind port (' . l:bind_port . ') must match g:typst_preview_url port ('
+          \ . l:url_port . ') for the same reason'
+  endif
+
+  return ''
+endfunction
 
 " Backed by a GLOBAL, not a plain script-local: this file is sourced via
 " `source ${./.}/typst.vim` from pkgs/vim/default.nix, and `${./.}` is a
@@ -153,6 +222,13 @@ function! s:OnPreviewErr(generation, channel, msg) abort
     call remove(s:preview.stderr_log, 0)
   endif
 
+  call s:EnsureLogDir()
+  call writefile([strftime('%Y-%m-%d %H:%M:%S')
+        \ . ' gen=' . a:generation
+        \ . ' phase=' . s:preview.phase
+        \ . ' entry=' . s:preview.entry
+        \ . ' ' . a:msg], g:typst_preview_log_file, 'a')
+
   if a:msg =~# 'Static file server listening on'
     " Retain the address Tinymist itself reports, not just the bind we
     " asked for -- if the two ever disagree, :TypstPreview status should
@@ -164,6 +240,16 @@ function! s:OnPreviewErr(generation, channel, msg) abort
     let s:preview.phase = 'failed'
     let s:preview.last_error = a:msg
     echoerr 'Typst preview failed: ' . a:msg
+  elseif a:msg =~# 'unexpected Origin header'
+    " The HTTP shell can already be up (this arrives after "listening")
+    " when this fires -- the rejected WebSocket upgrade is a distinct,
+    " later failure at a distinct edge, so it must overwrite phase/
+    " last_error here rather than being folded silently into the stderr
+    " ring below where only :TypstPreview logs would ever surface it.
+    let s:preview.phase = 'failed'
+    let s:preview.last_error = a:msg
+    echoerr 'Typst preview: WebSocket Origin rejected (' . a:msg . '). '
+          \ . 'See g:typst_preview_bind/g:typst_preview_url.'
   endif
 endfunction
 
@@ -198,7 +284,13 @@ function! s:OnPreviewExit(generation, job, status) abort
   if !empty(s:preview.pending_start)
     let l:target = s:preview.pending_start
     let s:preview.pending_start = ''
-    call s:StartForEntry(l:target)
+    " Always the deferred continuation of an explicit request (:TypstPreview
+    " restart, or start racing a still-in-flight stop) -- see where
+    " pending_start is set in s:MaybeStartForBuffer, both branches guarded
+    " by `if a:auto | return | endif` above. Never queued for an automatic
+    " FileType trigger, so a validation failure here should be as visible
+    " as it would have been had the stop not still been in flight.
+    call s:StartForEntry(l:target, 0)
   endif
 endfunction
 
@@ -206,17 +298,42 @@ function! s:IsTypstBufnr(bufnr) abort
   return getbufvar(a:bufnr, '&filetype') ==# 'typst' && !empty(bufname(a:bufnr))
 endfunction
 
-function! s:StartForEntry(entry) abort
+" a:auto mirrors s:MaybeStartForBuffer's own parameter (see there): 1 when
+" this call originated from the FileType autocmd or a pending_start
+" continuation of one, 0 for a direct :TypstPreview start/restart. A config
+" validation failure is real state either way (phase/last_error, visible
+" via :TypstPreview status regardless), but only an explicit invocation
+" should ever echoerr it -- doing so unconditionally would run this inside
+" a FileType autocmd's own dispatch, and an uncaught error from an `abort`
+" function there can cut off any *other* plugin's FileType autocmd still
+" queued for the same event on this buffer.
+function! s:StartForEntry(entry, auto) abort
   let s:preview.generation += 1
   let l:generation = s:preview.generation
 
   let s:preview.entry = a:entry
   let s:preview.bind = g:typst_preview_bind
   let s:preview.public_url = g:typst_preview_url
-  let s:preview.phase = 'starting'
   let s:preview.last_error = ''
   let s:preview.observed_listener = ''
   let s:preview.stderr_log = []
+
+  " Reject a bind/url host:port mismatch before ever spawning tinymist --
+  " see s:ValidatePreviewConfig() above g:typst_preview_bind for why this
+  " specific pin needs it. Without this, the failure only ever surfaces as
+  " a permanently blank browser page well after "listening" already showed.
+  let l:config_error = s:ValidatePreviewConfig(s:preview.bind, s:preview.public_url)
+  if !empty(l:config_error)
+    let s:preview.phase = 'failed'
+    let s:preview.last_error = l:config_error
+    let s:preview.job = v:null
+    if !a:auto
+      echoerr 'Typst preview: ' . l:config_error
+    endif
+    return
+  endif
+
+  let s:preview.phase = 'starting'
 
   " `--data-plane-host` is v0.14.18's intended path (hidden from `--help`
   " at this pin, but present and functional -- confirmed directly against
@@ -325,7 +442,7 @@ function! s:MaybeStartForBuffer(bufnr, auto) abort
     return
   endif
 
-  call s:StartForEntry(l:entry)
+  call s:StartForEntry(l:entry, a:auto)
 endfunction
 
 function! TypstPreviewStart(...) abort
@@ -399,22 +516,37 @@ function! TypstPreviewOpen() abort
   echom s:preview.public_url
 endfunction
 
-" --- :TypstPreview {start|stop|restart|status|open|help} -------------------
-" One discoverable, tab-completable entry point instead of five unrelated
+" Opens a Vim terminal following the persistent log file live, rather than
+" printing a static snapshot -- also echoes the exact path first so the
+" path is visible even if the terminal window is later closed, and so it
+" can be `tail -F`'d from an adjacent tmux pane instead if preferred.
+function! TypstPreviewLogs() abort
+  call s:EnsureLogDir()
+  if !filereadable(g:typst_preview_log_file)
+    call writefile([], g:typst_preview_log_file)
+  endif
+  echom 'Typst preview log: ' . g:typst_preview_log_file
+  execute 'terminal tail -F -- ' . shellescape(g:typst_preview_log_file)
+endfunction
+
+" --- :TypstPreview {start|stop|restart|status|open|logs|help} --------------
+" One discoverable, tab-completable entry point instead of several unrelated
 " Ex command names. The underlying TypstPreview{Start,Stop,...} commands
 " remain as thin compatibility aliases -- not a second implementation --
 " but documentation teaches only this grammar.
 function! s:TypstPreviewHelp() abort
-  echo ':TypstPreview {start|stop|restart|status|open|help}' . "\n"
+  echo ':TypstPreview {start|stop|restart|status|open|logs|help}' . "\n"
         \ . '  start    start the preview for the current entrypoint (no-op if already running for it)' . "\n"
         \ . '  stop     stop the owned preview job' . "\n"
         \ . '  restart  stop then start (recovery)' . "\n"
         \ . '  status   phase, job state, entrypoint, bind/public URL, last error' . "\n"
         \ . '  open     echo the public preview URL (never opens a local browser)' . "\n"
+        \ . '  logs     open a terminal following tinymist''s persisted stderr live' . "\n"
         \ . '  help     this message (also -h / --help / bare :TypstPreview)' . "\n"
         \ . '' . "\n"
         \ . 'Current: phase=' . s:ReconciledPhase() . ' entry=' . (empty(s:preview.entry) ? '(none)' : s:preview.entry) . "\n"
         \ . '  bind=' . g:typst_preview_bind . ' url=' . g:typst_preview_url . "\n"
+        \ . '  log=' . g:typst_preview_log_file . "\n"
         \ . "\n"
         \ . ':TypstLiveWriteToggle toggles buffer-local autosave-after-quiet-pause (off by default).'
 endfunction
@@ -434,13 +566,15 @@ function! TypstPreviewDispatch(args) abort
     call TypstPreviewStatus()
   elseif l:sub ==# 'open'
     call TypstPreviewOpen()
+  elseif l:sub ==# 'logs'
+    call TypstPreviewLogs()
   else
     echoerr 'Unknown :TypstPreview subcommand: ' . l:sub . '. Try :TypstPreview help.'
   endif
 endfunction
 
 function! TypstPreviewComplete(arglead, cmdline, cursorpos) abort
-  let l:subs = ['start', 'stop', 'restart', 'status', 'open', 'help']
+  let l:subs = ['start', 'stop', 'restart', 'status', 'open', 'logs', 'help']
   return filter(copy(l:subs), 'stridx(v:val, a:arglead) == 0')
 endfunction
 
@@ -453,6 +587,7 @@ command! TypstPreviewStop call TypstPreviewStop()
 command! TypstPreviewRestart call TypstPreviewRestart()
 command! TypstPreviewStatus call TypstPreviewStatus()
 command! TypstPreviewOpen call TypstPreviewOpen()
+command! TypstPreviewLogs call TypstPreviewLogs()
 
 augroup typst_preview_lifecycle
   autocmd!

@@ -32,7 +32,7 @@ completely indifferent to this change.
 | --- | --- | --- | --- |
 | Storybook (`some-ui`) | `.bashrc` autostarts `pnpm storybook`; port 6006 in `nixos/port-configuration` | No — HTTP, binds `0.0.0.0`, `allowedHosts: nixos.local` | Web-forwarded, unaffected |
 | Vite previews | same project | No — HTTP | Web-forwarded, unaffected |
-| `tinymist` typst preview | `pkgs/vim/typst.vim` (sourced from `pkgs/vim/default.nix`) → `--data-plane-host 0.0.0.0:3141`, browsed at `nixos.local:3141`; port 3141 registered | No — HTTP over mDNS | Web-forwarded, unaffected |
+| `tinymist` typst preview | `pkgs/vim/typst.vim` (sourced from `pkgs/vim/default.nix`) → `--data-plane-host nixos.local:3141`, browsed at `nixos.local:3141`; port 3141 registered | No — HTTP over mDNS | Web-forwarded, unaffected |
 | Grafana / Prometheus / Redis admin / Metabase | `nixos/port-configuration` | No — HTTP | Web-forwarded, unaffected |
 | Clipboard (tmux yank, vim `"+y`, CLI pipes) | `home-manager/shell/{tmux,clipboard}`, `pkgs/vim` | Not since #15 — OSC52 over the ssh TTY | Already migrated |
 | OBS audio capture | `obs/`, NATS to `nixos.local:4222` | No — runs client-side on Windows/WSL | Unaffected |
@@ -160,8 +160,10 @@ if step 3.2 shows no `DISPLAY`, land the fixture flags first.
 
 ## S4 — the dev servers were never forwarded
 
-Storybook, Vite and `tinymist` bind `0.0.0.0` and are reached at
-`http://nixos.local:<port>` from the Windows browser. They are listed in
+Storybook and Vite bind `0.0.0.0`; `tinymist` binds `nixos.local` directly
+(its own WebSocket-Origin validation ties the two together — see
+`docs/typst-math-workflow.md`). All three are reached at
+`http://nixos.local:<port>` from the Windows browser, are listed in
 `nixos/port-configuration` with their firewall rules, and none of them consult
 `$DISPLAY`. Turning `X11Forwarding` off cannot affect them — but "cannot
 affect them" is a claim, and the test matrix below is where it gets checked

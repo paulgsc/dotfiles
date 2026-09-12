@@ -233,7 +233,7 @@ _: {
         port = 3141;
         protocol = "tcp";
         service = "typst-preview";
-        description = "tinymist live-preview HTTP server (vim binds --data-plane-host 0.0.0.0:3141; the wildcard bind is safe only because this firewall rule restricts it to the LAN subnet below; browsed from LAN via nixos.local)";
+        description = "tinymist live-preview HTTP server (vim binds --data-plane-host nixos.local:3141, matching the browsed URL's host -- tinymist v0.14.18 validates the WebSocket Origin against the bind hostname itself, so a wildcard 0.0.0.0 bind here would make the preview page load but its WebSocket connection fail; this firewall rule still restricts LAN reachability regardless of bind host)";
         externalAccess = false;
         srcSubnets = ["10.0.0.0/24"];
       }
