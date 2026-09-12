@@ -71,7 +71,12 @@ review of whatever it finds.** Read the closing review's finding, if any, this w
 - **Clean, or only trivial/low-risk** (documentation, phrasing, additive text, anything
   that doesn't change real behavior or a load-bearing rule) — fix it directly and merge.
   A small fix doesn't need its own re-review; re-review-forever is exactly the cost this
-  cap exists to bound.
+  cap exists to bound. This is the one explicit exception to the auto-merge section's
+  exact-head coverage rule below: the fix commit itself was never independently reviewed
+  (it necessarily changes the head SHA), but the closing review already covered the
+  substance of what changed, and by definition nothing in a trivial/low-risk fix needs
+  more than that. The exception is narrow and does not extend past this specific
+  sequence — any other push still needs its own confirmed coverage before auto-merge.
 - **Substantive** (changes real behavior, logic, or a load-bearing rule) — that's the
   signal to stop automating entirely and hand off to the user for approval or manual
   merge, not push another automatic round hoping it's the last one.
@@ -99,7 +104,9 @@ treat it as scoped to this exact repo only — it does not carry over to any oth
 session touches. When it applies: confirm CI is green on the _current_ head (per the
 freshness check above), confirm `mergeable_state: "clean"`, confirm bot-review coverage on
 the current head is actually confirmed — "no unresolved thread" is not the same as
-"reviewed," since a review requested but not yet answered creates no thread at all.
+"reviewed," since a review requested but not yet answered creates no thread at all. (The
+one exception to needing coverage on the _exact_ current head is the trivial-fix-after-
+closing-review sequence described above — nowhere else.)
 **Unlike `babysit/SKILL.md`'s stand-down criteria, auto-merge does not get babysit's
 graceful timeout** — that timeout only licenses ending active polling while leaving the PR
 for a human to merge; it never licenses merging a push nobody has actually reviewed. If
