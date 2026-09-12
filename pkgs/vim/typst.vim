@@ -73,19 +73,33 @@ call ale#linter#Define('typst', {
 let g:typst_preview_bind = get(g:, 'typst_preview_bind', '0.0.0.0:3141')
 let g:typst_preview_url = get(g:, 'typst_preview_url', 'http://nixos.local:3141/')
 
-let s:preview = {
-      \ 'job': v:null,
-      \ 'generation': 0,
-      \ 'entry': '',
-      \ 'bind': '',
-      \ 'public_url': '',
-      \ 'phase': 'stopped',
-      \ 'observed_listener': '',
-      \ 'last_error': '',
-      \ 'stderr_log': [],
-      \ 'stopping': 0,
-      \ 'pending_start': '',
-      \ }
+" Guarded so re-sourcing this file (e.g. `:source $MYVIMRC` after editing
+" an unrelated mapping) does not blindly discard a live preview's state.
+" Script-local variables survive re-sourcing the same script; only the
+" first load should reset them. Without this guard, re-sourcing while a
+" preview is running would replace s:preview.job with a fresh v:null
+" *without ever stopping the actual process* -- it keeps running, still
+" holding the port, now completely untracked -- and would reset
+" generation back to 0, so a later start's generation could collide with
+" the orphaned job's still-pending callbacks (bound to whatever
+" generation they were at before the reset) and let a stale callback
+" mutate the new job's state, reintroducing exactly the class of bug
+" already fixed above for the normal (non-resourcing) case.
+if !exists('s:preview')
+  let s:preview = {
+        \ 'job': v:null,
+        \ 'generation': 0,
+        \ 'entry': '',
+        \ 'bind': '',
+        \ 'public_url': '',
+        \ 'phase': 'stopped',
+        \ 'observed_listener': '',
+        \ 'last_error': '',
+        \ 'stderr_log': [],
+        \ 'stopping': 0,
+        \ 'pending_start': '',
+        \ }
+endif
 
 " Tinymist logs exclusively to stderr, not stdout (verified against the
 " tinymist v0.14.18 binary: stdout is empty for the whole process
