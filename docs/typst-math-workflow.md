@@ -40,61 +40,123 @@ the file *on disk*. Two things make that actively counterproductive:
 
 ## Commands
 
-- `:TypstPreviewStart` — start once for the current buffer's entrypoint if
-  not already running; a no-op if it's already running for that same file.
-  Also runs automatically on `FileType typst`, but the automatic call is
-  quiet about the two cases that are routine rather than errors: an
-  unsaved new buffer, or a different entry already running a preview.
-  Only an explicit `:TypstPreviewStart` reports those with an error.
-- `:TypstPreviewStop` — stop the owned preview job.
-- `:TypstPreviewRestart` — explicit stop+start, for recovery.
-- `:TypstPreviewStatus` — entrypoint, job state, address, last error line.
-- `:TypstPreviewOpen` — echoes the preview URL (`http://nixos.local:3141/`
-  by default) to copy into the Windows browser. Never tries to launch a
-  remote GUI browser itself.
-- `:TypstLiveWriteToggle` — buffer-local opt-in: after this is on, a quiet
-  pause in typing triggers `:update` (writes only if modified). Off by
-  default; never a blanket autosave policy for every `.typ` file.
+One discoverable, tab-completable entry point:
 
-`g:typst_preview_host` (default `'nixos.local'`) and `g:typst_preview_port`
-(default `3141`, matching the firewall rule in
-`nixos/port-configuration/default.nix`) are overridable in a personal vimrc
-if ever needed.
+```vim
+:TypstPreview {start|stop|restart|status|open|help}
+```
+
+- `start` — start once for the current buffer's entrypoint if not already
+  running; a no-op if it's already running for that same file. Also runs
+  automatically on `FileType typst`, but the automatic call is quiet about
+  the two cases that are routine rather than errors: an unsaved new
+  buffer, or a different entry already running a preview. Only an
+  explicit `start` reports those with an error.
+- `stop` — stop the owned preview job. Reports `stopping` immediately,
+  `stopped` only once the process has actually exited — `job_stop()` only
+  *requests* termination, so the port may still be held for a moment
+  after this returns.
+- `restart` — explicit stop+start, for recovery.
+- `status` — phase, actual `job_status()`, entrypoint, bind address,
+  public URL, the address Tinymist itself reported listening on, and the
+  last failure. A cached `starting`/`listening` phase is reconciled
+  against the live job status here, so this can never claim a
+  browser-ready service for a job that's actually dead.
+- `open` — echoes the public preview URL to copy into the Windows
+  browser. Refuses (with an error) unless the phase is verified
+  `listening`, reconciled the same way. Never tries to launch a remote
+  GUI browser itself.
+- `help` (also bare `:TypstPreview`, `-h`, `--help`) — the above in one
+  screen, plus the current phase/entry/bind/url.
+
+`:TypstPreviewStart`/`Stop`/`Restart`/`Status`/`Open` remain as thin
+compatibility aliases for the equivalent subcommand, but this document and
+any new mappings should only teach the `:TypstPreview` form.
+
+- `:TypstLiveWriteToggle` — buffer-local opt-in: after this is on, a quiet
+  pause in typing triggers `:update` (writes only if modified) **while
+  that buffer is still the active one**. Off by default; never a blanket
+  autosave policy for every `.typ` file. See "Live-write: active-buffer
+  only" below for what changed here and why.
+
+`g:typst_preview_bind` (default `'0.0.0.0:3141'`) and `g:typst_preview_url`
+(default `'http://nixos.local:3141/'`) are separate variables, overridable
+in a personal vimrc if ever needed: one is what Tinymist is told to listen
+on, the other is what the browser is told to visit, and neither is ever
+inferred from the other. The wildcard bind is safe specifically because
+`nixos/port-configuration/default.nix` restricts `3141/tcp` to the LAN
+subnet at the firewall — it is not a general recommendation.
 
 Diagnostics come from ALE talking `textDocument/didChange` to `tinymist lsp`
 over stdio — independent of whether the preview is running, and independent
 of whether the buffer has been saved.
 
-## Preview address: why `--host`, not `--data-plane-host`
+## Preview address: `--data-plane-host`, not deprecated `--host`
 
-`tinymist preview --host <addr>` is still used, deliberately, even though
-`--host` is marked `(Deprecated)` in `tinymist preview --help`. Verified
-directly against the pinned v0.14.18 binary:
+`tinymist preview --data-plane-host <bind>` is used, with an explicit
+`--control-plane-host 127.0.0.1:0` alongside it and no `--host` at all.
+This replaced an earlier version of this integration that used `--host`
+deliberately; verified directly against the pinned v0.14.18 binary that
+the newer approach is strictly better:
 
-- `tinymist preview` actually opens three listeners: `data_plane_host` and
-  `control_plane_host` (both default to `127.0.0.1:<random>` if unset), and
-  `static_file_host`, which is what `--host` actually sets (the CLI's own
-  help text describing `--host` as an alias for `data_plane_host` does not
-  match the binary's behavior — a real discrepancy between docs and this
-  build).
-- Despite that split, driving a real headless-Chromium session at the
-  `--host` address alone renders correctly end-to-end: the page's WebSocket
-  connects back to that same address (`ws://<host>/`, same-origin), live
-  SVG content renders, and there are zero failed requests or console
-  errors. `--data-plane-host`/`--control-plane-host` only matter if you
-  want those split onto separate addresses, which this single-port,
-  firewall-scoped deployment does not need.
-- A port already in use makes the process abort outright (a Rust panic,
-  `AddrInUse`), not silently keep serving stale content — `typst.vim`'s
-  `err_cb` watches stderr (tinymist logs there exclusively, not stdout) for
-  `Address already in use` / `panicked at` and marks the preview `failed`
-  rather than leaving a false `listening` status.
+- With no `--host` given, Tinymist's `static_file_host` (the frontend/
+  WebSocket listener) defaults to the same address as `data_plane_host`
+  rather than a separate compatibility split — confirmed directly: the
+  stderr log lines `Data plane server listening on: <addr>` and
+  `Static file server listening on: <addr>` report the *same* address
+  when only `--data-plane-host` is passed. One socket serves everything a
+  browser needs; `--host`'s deprecated compatibility path is never
+  invoked.
+- `--control-plane-host 127.0.0.1:0` asks the OS for an ephemeral port
+  for Tinymist's internal control channel instead of leaving it on the
+  hidden default (`127.0.0.1:23626`). Confirmed directly that the hidden
+  default can be occupied by something unrelated to this feature, and
+  when it is, Tinymist logs the data-plane listener as ready and *then*
+  panics trying to bind the control channel, aborting the whole process a
+  moment later — an avoidable false-`listening` window that pinning this
+  to an OS-assigned port removes entirely.
+- A port already in use on the *advertised* (data-plane) address still
+  makes the process abort outright before ever logging a listening line
+  for it (a Rust panic, `AddrInUse`), confirmed directly — not silently
+  serving stale content. `typst.vim`'s `err_cb` watches stderr (tinymist
+  logs there exclusively, not stdout) for `Address already in use` /
+  `panicked at` and marks the preview `failed` rather than leaving a
+  false `listening` status; `:TypstPreview status`'s reconciliation
+  against the live job additionally catches the case where the process
+  dies for any other reason before that stderr line is even parsed.
+
+## Live-write: active-buffer only
+
+`:TypstLiveWriteToggle`'s debounced `:update` only ever fires while its
+buffer is still the current buffer in the current window. There is no
+searching other tabs and no borrowing another window to reach a buffer
+that has been hidden entirely — leaving the buffer (`BufLeave`)
+synchronously flushes it (if dirty) and cancels the pending timer instead
+of trying to reach it again later wherever it ends up.
+
+This replaced an earlier, stronger contract that *did* survive tab
+switches and fully hidden buffers, built up over several rounds of
+fixing genuinely subtle bugs in that machinery (cross-tab window lookup,
+borrowing a window under `'nohidden'` without losing the user's actual
+alternate-buffer navigation state, and more). That contract was never an
+explicit requirement of the actual authoring workflow this feature
+serves — "autosave this exercise after a quiet pause while I'm working on
+it" does not obviously imply "keep finding and background-saving it after
+I've moved on to something else entirely" — and it added real surface for
+a guarantee nothing here actually asked for. Sunk review cost is not a
+product requirement on its own; the simpler, bounded contract is
+preferred.
 
 ## Snippets
 
 `vim-vsnip` (`<C-j>` expand/next placeholder, `<C-h>` previous placeholder,
-insert and select mode) with a small structural grammar in
-`pkgs/vim/snippets/typst.json`: `eqi`/`eqb` (inline/block equation shells),
+insert and select mode, mapped buffer-locally to Typst buffers only — not
+a global editor default other filetypes inherit) with a small structural
+grammar in `pkgs/vim/snippets/typst.json`, added to `g:vsnip_snippet_dirs`
+(the additive list vsnip merges alongside its own primary
+`g:vsnip_snippet_dir`, confirmed against the pinned vsnip source) rather
+than overwriting `g:vsnip_snippet_dir` itself — a personal snippet
+directory set there stays intact: `eqi`/`eqb` (inline/block equation shells),
 `frac`, `sqrt`, `root`, `sum`, `prod`, `int`, `lim`, `align` (aligned
 derivation), `cases`, `mat`, `vec`. Every one of these was compiled and,
 where layout mattered (the aligned derivation, cases), rendered to PNG
@@ -132,25 +194,62 @@ those need a run on the real machine:
       comma`) against an in-memory, never-saved buffer via the real ALE
       engine, not just a raw LSP probe.
 - [x] `textDocument/completion` inside math returns `sqrt`/`square`.
-- [x] All six `TypstPreview*`/`TypstLiveWriteToggle` commands are defined
-      after sourcing.
-- [x] `vim-vsnip` expands all 13 snippets with the expected content.
+- [x] `:TypstPreview` dispatches `start`/`stop`/`restart`/`status`/`open`
+      correctly; bare `:TypstPreview`, `help`, `-h`, `--help` all print the
+      same usage; an unknown subcommand errors; tab completion lists all
+      six subcommands and filters correctly by prefix (`st` →
+      `start`/`stop`/`status`). The five `TypstPreview*` compatibility
+      aliases and `TypstLiveWriteToggle` are all still defined after
+      sourcing.
+- [x] `vim-vsnip` finds snippets from both `g:vsnip_snippet_dirs` (this
+      plugin's managed set) and a separately-configured `g:vsnip_snippet_dir`
+      (simulating a user's own pre-existing snippet directory) at once —
+      neither displaces the other. All 13 managed snippets carry correct,
+      compiler-verified Typst syntax. The `<C-j>`/`<C-h>` mappings are
+      buffer-local (confirmed via `maparg(..., 0, 1).buffer ==# 1`) and
+      absent entirely in a non-Typst buffer.
 - [x] A persistent `tinymist preview` process recompiles on save without
-      being restarted.
-- [x] `--host <addr>` alone is sufficient for a real browser to load and
-      live-render content (headless Chromium, WebSocket observed, SVG
-      content present, zero console/network errors).
-- [x] A port conflict produces a hard, observable failure rather than a
-      false "still running" status (`:TypstPreviewStatus` reports
-      `failed`).
+      being restarted; started via `--data-plane-host` (not the deprecated
+      `--host`), confirmed to report the same address for both the data
+      plane and static-file listeners.
+- [x] Occupying Tinymist's hidden default control-plane port (`23626`)
+      does not block the advertised data-plane listener from reaching
+      `listening`, because `--control-plane-host 127.0.0.1:0` no longer
+      leaves that channel on the conflictable default.
+- [x] A port conflict on the advertised address produces a hard,
+      observable failure rather than a false "still running" status
+      (`:TypstPreview status` reports `failed`).
+- [x] `:TypstPreview stop` reports `stopping` immediately and only reaches
+      `stopped` once the process has actually exited, never the reverse.
+- [x] `:TypstPreview status`/`open` reconcile a cached `starting`/
+      `listening` phase against the live `job_status()`: after killing the
+      owned process out-of-band (bypassing `stop` entirely), polled
+      repeatedly, status never reports `listening` at any tick where
+      `job_status()` itself has already stopped returning `run` — the only
+      observed lag is Vim's own job-status cache catching up to the kill,
+      not anything added on top of it.
+- [x] A missing/non-spawnable `tinymist` executable never leaves the
+      preview stuck reporting `starting` indefinitely; it reaches `failed`
+      with a recorded last-error (in this sandbox's Vim build, via the
+      normal async exit path rather than a synchronous `job_start()`
+      failure — the synchronous check is retained regardless, since
+      `:help job_start()` documents it as possible on other platforms).
 - [x] Leaving the exercise buffer for another buffer does not stop the
-      preview; starting the same entrypoint twice is a no-op; `VimLeavePre`
-      stops the owned preview job.
-- [x] `:TypstLiveWriteToggle`, under a real interactive Vim session with
-      realistic per-keystroke timing: a burst of typing produces exactly
-      one `:update` after the configured quiet interval (not one per
-      keystroke), the buffer becomes unmodified, and the file on disk
-      matches what was typed.
+      preview; starting the same entrypoint twice is a no-op; opening a
+      second, different `.typ` file while a preview is running elsewhere
+      is silent (not an error) when triggered by `FileType`, but still
+      errors on an explicit `:TypstPreview start`; `VimLeavePre` stops the
+      owned preview job.
+- [x] `:TypstLiveWriteToggle`'s active-buffer-only contract: a burst of
+      typing produces exactly one `:update` after the configured quiet
+      interval while the buffer stays current (not one per keystroke);
+      leaving the buffer before the quiet interval elapses (`:hide edit`
+      or `:tabnew` to another file, both while the buffer is dirty)
+      flushes it synchronously and cancels the pending timer, rather than
+      the previous cross-tab/hidden-buffer-reaching behavior — parking a
+      dirtied buffer in another tab no longer results in a later
+      background write reaching back into it, because it was already
+      flushed at the moment it was left.
 - [ ] **Needs the real host:** `http://nixos.local:3141` reachable from
       the actual Windows browser over the LAN (firewall + mDNS + real
       network path — nothing in a sandbox can stand in for this).
@@ -182,7 +281,15 @@ those need a run on the real machine:
       filesystem, plain `'auto'` already preserved the inode across a save
       for a simple single-link file, so the failure mode this fix targets
       never reproduced here to be falsified either way. The real host's
-      Vim build and filesystem may make a different heuristic choice.
+      Vim build and filesystem may make a different heuristic choice. The
+      preview invocation has since also switched from deprecated `--host`
+      to `--data-plane-host`/`--control-plane-host 127.0.0.1:0` (see
+      "Preview address" above) — a second candidate fix for the same
+      report, on the theory that the deprecated compatibility split could
+      itself be a source of transport instability, though nothing in the
+      sandbox evidence specifically implicated it over the `backupcopy`
+      explanation. Both changes are safe and correct independent of which
+      one (if either) was the actual cause.
       **Needs, on the real host:** confirm `:setlocal backupcopy?` reads
       `yes` for a Typst buffer, then perform at least two direct `:w`
       saves with visibly different content and confirm the browser
@@ -192,8 +299,7 @@ those need a run on the real machine:
       Vim lifecycle code entirely) to see whether a filesystem event and a
       recompile are actually being logged for the second save — that
       isolates a watcher-level failure from a browser/WebSocket-transport
-      one, which would need a different fix (e.g. `--data-plane-host`
-      instead of the deprecated `--host`).
+      one.
 - [ ] **Open user decision:** literal PDF output was not requested and is
       not implemented. The live web preview is being treated as satisfying
       "PDF preview" for this first slice (Tinymist's own docs recommend

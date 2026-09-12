@@ -227,13 +227,13 @@ _: {
       }
 
       # ═══════════════════════════════════════════════════════════
-      # Typst live preview (localhost only)
+      # Typst live preview (LAN-restricted)
       # ═══════════════════════════════════════════════════════════
       {
         port = 3141;
         protocol = "tcp";
         service = "typst-preview";
-        description = "tinymist live-preview HTTP server (vim binds --host nixos.local:3141, browsed from LAN)";
+        description = "tinymist live-preview HTTP server (vim binds --data-plane-host 0.0.0.0:3141; the wildcard bind is safe only because this firewall rule restricts it to the LAN subnet below; browsed from LAN via nixos.local)";
         externalAccess = false;
         srcSubnets = ["10.0.0.0/24"];
       }

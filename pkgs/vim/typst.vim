@@ -9,6 +9,9 @@
 "     be restarted on a text-change event, only started once per entrypoint.
 "   - The two are lifecycle-independent: killing/restarting one must not
 "     touch the other.
+"   - Bind address (what Tinymist is told to listen on) and public URL
+"     (what the browser is told to visit) are modeled as separate facts,
+"     never inferred from each other -- see :TypstPreview status.
 
 " --- ALE: register Tinymist as a real stdio LSP for Typst -----------------
 " Upstream ALE (pinned via vimPlugins.ale) ships a `typstyle` *fixer* for
@@ -50,67 +53,99 @@ call ale#linter#Define('typst', {
 " process and creates PID/port races without publishing anything Tinymist's
 " own watcher wasn't already going to see. So: start once, leave it running,
 " let `:w` do the rest.
-let g:typst_preview_host = get(g:, 'typst_preview_host', 'nixos.local')
-let g:typst_preview_port = get(g:, 'typst_preview_port', 3141)
+"
+" `bind` (what Tinymist listens on) and `url` (what the browser is told to
+" visit) are deliberately separate variables, never one hostname reused for
+" both roles. A wildcard bind is safe here specifically because
+" nixos/port-configuration/default.nix restricts 3141/tcp to the trusted
+" LAN subnet at the firewall -- this is not a general recommendation to
+" bind 0.0.0.0.
+let g:typst_preview_bind = get(g:, 'typst_preview_bind', '0.0.0.0:3141')
+let g:typst_preview_url = get(g:, 'typst_preview_url', 'http://nixos.local:3141/')
 
 let s:preview = {
       \ 'job': v:null,
+      \ 'generation': 0,
       \ 'entry': '',
-      \ 'address': '',
-      \ 'status': 'stopped',
+      \ 'bind': '',
+      \ 'public_url': '',
+      \ 'phase': 'stopped',
+      \ 'observed_listener': '',
       \ 'last_error': '',
+      \ 'stderr_log': [],
       \ 'stopping': 0,
       \ 'pending_start': '',
       \ }
-
-function! s:PreviewAddress() abort
-  return g:typst_preview_host . ':' . g:typst_preview_port
-endfunction
 
 " Tinymist logs exclusively to stderr, not stdout (verified against the
 " tinymist v0.14.18 binary: stdout is empty for the whole process
 " lifetime). Readiness and failure must therefore be read from err_cb, not
 " out_cb.
-function! s:OnPreviewErr(channel, msg) abort
-  " A job's stderr can be buffered and delivered after we've already
-  " decided it's gone -- job_stop() only requests termination, and Vim
-  " may still flush queued channel output afterward, possibly after a
-  " replacement job has already started. Identify the message by the
-  " channel it actually came from rather than trusting "a job is
-  " currently tracked": a stale message from a dead job must not
-  " overwrite state that a live one (or the intentional stopped/starting
-  " state) already owns.
-  if s:preview.job is v:null || job_getchannel(s:preview.job) != a:channel
+"
+" a:generation is bound at job-start time via the Funcref partial below, not
+" read from ambient state -- this is the one piece of evidence a callback
+" needs to know whether it still belongs to the job s:preview currently
+" owns. A job's stderr/exit can be delivered after we've already decided
+" it's gone (job_stop() only requests termination, and Vim may still flush
+" queued channel output or fire exit_cb afterward, possibly after a
+" replacement job has already started for a different entry): a stale
+" callback from a superseded generation must never mutate state a live one
+" already owns.
+function! s:OnPreviewErr(generation, channel, msg) abort
+  if a:generation != s:preview.generation
     return
   endif
 
-  let s:preview.last_error = a:msg
+  " A bounded ring, not a single overwritten scalar: an informational log
+  " line must not erase a genuine prior failure, and last_error itself is
+  " only ever set below from an actual failure line, not every line seen.
+  call add(s:preview.stderr_log, a:msg)
+  if len(s:preview.stderr_log) > 20
+    call remove(s:preview.stderr_log, 0)
+  endif
 
   if a:msg =~# 'Static file server listening on'
-    let s:preview.status = 'listening'
-    echom 'Typst preview: listening on http://' . s:preview.address . '/'
+    " Retain the address Tinymist itself reports, not just the bind we
+    " asked for -- if the two ever disagree, :TypstPreview status should
+    " be able to show that instead of asserting they must match.
+    let s:preview.observed_listener = matchstr(a:msg, 'Static file server listening on:\s*\zs\S\+')
+    let s:preview.phase = 'listening'
+    echom 'Typst preview: listening at ' . s:preview.public_url
   elseif a:msg =~# 'Address already in use' || a:msg =~# 'panicked at'
-    let s:preview.status = 'failed'
+    let s:preview.phase = 'failed'
+    let s:preview.last_error = a:msg
     echoerr 'Typst preview failed: ' . a:msg
   endif
 endfunction
 
-function! s:OnPreviewExit(job, status) abort
-  if !s:preview.stopping && s:preview.status !=# 'failed'
-    let s:preview.status = 'failed'
-    echoerr 'Typst preview exited unexpectedly (status ' . a:status . '). See :TypstPreviewStatus.'
+function! s:OnPreviewExit(generation, job, status) abort
+  if a:generation != s:preview.generation
+    return
   endif
+
+  if s:preview.stopping
+    " Only a confirmed exit may ever advertise 'stopped' -- job_stop()
+    " itself only requests asynchronous termination, so TypstPreviewStop()
+    " sets 'stopping', not 'stopped', and waits for this callback.
+    let s:preview.phase = 'stopped'
+    let s:preview.entry = ''
+  elseif s:preview.phase !=# 'failed'
+    let s:preview.phase = 'failed'
+    let s:preview.last_error = 'exited unexpectedly (status ' . a:status . ')'
+    echoerr 'Typst preview exited unexpectedly (status ' . a:status . '). See :TypstPreview status.'
+  endif
+
   let s:preview.job = v:null
   let s:preview.stopping = 0
 
   " job_stop() only requests termination; the OS reaps the process and this
   " callback fires asynchronously, later. Any start requested while a stop
-  " was still in flight -- via :TypstPreviewRestart, or plain :TypstPreviewStop
-  " immediately followed by :TypstPreviewStart -- gets queued in
-  " pending_start (by TypstPreviewStart itself, see below) instead of
-  " racing the old job's belated exit. The entrypoint is captured at
-  " request time, not re-resolved from "whatever buffer is current" once
-  " this callback finally runs.
+  " was still in flight -- via :TypstPreview restart, or plain stop
+  " immediately followed by start -- gets queued in pending_start (by
+  " s:MaybeStartForBuffer itself, see below) instead of racing the old
+  " job's belated exit. The entrypoint is captured at request time, not
+  " re-resolved from "whatever buffer is current" once this callback
+  " finally runs.
   if !empty(s:preview.pending_start)
     let l:target = s:preview.pending_start
     let s:preview.pending_start = ''
@@ -118,43 +153,90 @@ function! s:OnPreviewExit(job, status) abort
   endif
 endfunction
 
-function! s:IsTypstBuffer() abort
-  return &filetype ==# 'typst' && !empty(expand('%:p'))
+function! s:IsTypstBufnr(bufnr) abort
+  return getbufvar(a:bufnr, '&filetype') ==# 'typst' && !empty(bufname(a:bufnr))
 endfunction
 
 function! s:StartForEntry(entry) abort
-  let s:preview.entry = a:entry
-  let s:preview.address = s:PreviewAddress()
-  let s:preview.status = 'starting'
-  let s:preview.last_error = ''
+  let s:preview.generation += 1
+  let l:generation = s:preview.generation
 
+  let s:preview.entry = a:entry
+  let s:preview.bind = g:typst_preview_bind
+  let s:preview.public_url = g:typst_preview_url
+  let s:preview.phase = 'starting'
+  let s:preview.last_error = ''
+  let s:preview.observed_listener = ''
+  let s:preview.stderr_log = []
+
+  " `--data-plane-host` is v0.14.18's intended path (hidden from `--help`
+  " at this pin, but present and functional -- confirmed directly against
+  " the pinned binary) and, with no `--host` given, the same listener
+  " serves the frontend, WebSocket, and data plane together: one socket,
+  " not the deprecated `--host` compatibility split. `--control-plane-host
+  " 127.0.0.1:0` asks the OS for an ephemeral port for Tinymist's internal
+  " control channel so it can never collide with anything -- confirmed
+  " directly that a fixed default (23626) can otherwise be occupied by an
+  " unrelated process and abort the whole preview process with a panic
+  " *after* the data-plane listener already reported itself ready, which
+  " would otherwise show as a false 'listening' phase for a job that is
+  " actually seconds from dying.
   let s:preview.job = job_start(
-        \ ['tinymist', 'preview', '--host', s:preview.address, '--no-open', a:entry],
+        \ ['tinymist', 'preview',
+        \   '--data-plane-host', s:preview.bind,
+        \   '--control-plane-host', '127.0.0.1:0',
+        \   '--no-open', a:entry],
         \ {
-        \   'err_cb': function('s:OnPreviewErr'),
-        \   'exit_cb': function('s:OnPreviewExit'),
+        \   'err_cb': function('s:OnPreviewErr', [l:generation]),
+        \   'exit_cb': function('s:OnPreviewExit', [l:generation]),
         \ })
+
+  " job_start() can, on some platforms/circumstances, return a Job whose
+  " own immediate status is already 'fail' without ever invoking exit_cb
+  " for that failure; see :help job_start() and :help job_status(). This
+  " guard costs nothing and catches that case synchronously instead of
+  " leaving 'starting' cached indefinitely for a job that never actually
+  " ran. (Confirmed directly that a missing/non-executable target on this
+  " platform instead goes through the normal fork-then-async-exit path --
+  " job_status() reads 'run' immediately after job_start() and only
+  " becomes 'dead' after an event-loop tick, reaching s:OnPreviewExit's
+  " generic branch below instead of this one. Both paths converge on the
+  " same outcome -- 'failed', never stuck at 'starting' -- so this guard
+  " is retained for the platforms where the synchronous case is real,
+  " without being load-bearing for this one.)
+  if job_status(s:preview.job) ==# 'fail'
+    let s:preview.phase = 'failed'
+    let s:preview.last_error = 'tinymist failed to start (missing executable or invalid arguments?)'
+    let s:preview.job = v:null
+  endif
 endfunction
 
-" a:1 (optional): 1 when called from the FileType autocmd rather than a
-" direct :TypstPreviewStart. The autocmd fires for every saved-or-not .typ
+" The single boundary both the automatic (FileType) and explicit
+" (:TypstPreview start) paths converge on. a:bufnr is captured by the
+" caller -- from <abuf> at the autocmd boundary, or bufnr('%') for an
+" explicit call -- rather than read again from ambient '%' state deeper in
+" here, so the entrypoint a start acts on is never ambiguous about which
+" buffer it came from.
+"
+" a:auto: 1 when called from the FileType autocmd rather than a direct
+" :TypstPreview start. The autocmd fires for every saved-or-not .typ
 " buffer a user merely opens -- a brand-new unsaved exercise, or a second
 " file opened just to read it while a different entry's preview is already
 " running. Neither is a user request to start (or switch) a preview, so
 " those two cases must stay quiet there; only an explicit invocation should
 " ever echoerr about them.
-function! TypstPreviewStart(...) abort
-  let l:auto = get(a:, 1, 0)
-
-  if !s:IsTypstBuffer()
-    echoerr 'Not a Typst buffer.'
+function! s:MaybeStartForBuffer(bufnr, auto) abort
+  if !s:IsTypstBufnr(a:bufnr)
+    if !a:auto
+      echoerr 'Not a Typst buffer.'
+    endif
     return
   endif
 
-  let l:entry = expand('%:p')
+  let l:entry = fnamemodify(bufname(a:bufnr), ':p')
 
   if !filereadable(l:entry)
-    if l:auto
+    if a:auto
       return
     endif
     echoerr 'Save this buffer before starting the preview (Tinymist previews a saved file, not an unsaved buffer).'
@@ -170,34 +252,45 @@ function! TypstPreviewStart(...) abort
     return
   endif
 
-  if s:preview.status =~# '^\(starting\|listening\)$'
+  if s:preview.phase =~# '^\(starting\|listening\)$'
     if s:preview.entry ==# l:entry
-      echom 'Typst preview already running for ' . l:entry . ' at http://' . s:preview.address . '/'
+      echom 'Typst preview already running for ' . l:entry . ' at ' . s:preview.public_url
       return
     endif
 
-    if l:auto
+    if a:auto
       return
     endif
 
     echoerr 'Typst preview is already running for ' . s:preview.entry
-          \ . '. Run :TypstPreviewStop first to switch entrypoints.'
+          \ . '. Run :TypstPreview stop first to switch entrypoints.'
     return
   endif
 
   call s:StartForEntry(l:entry)
 endfunction
 
+function! TypstPreviewStart(...) abort
+  call s:MaybeStartForBuffer(bufnr('%'), get(a:, 1, 0))
+endfunction
+
 function! TypstPreviewStop() abort
   let s:preview.pending_start = ''
   if s:preview.job isnot v:null && job_status(s:preview.job) ==# 'run'
+    " 'stopping', never 'stopped', until s:OnPreviewExit's callback
+    " actually confirms the process is gone -- job_stop() only requests
+    " termination and the port may still be held for some time after this
+    " returns.
     let s:preview.stopping = 1
+    let s:preview.phase = 'stopping'
     call job_stop(s:preview.job, 'term')
+  else
+    " No live job to stop (already stopped/failed, or job_start itself
+    " failed synchronously) -- there is nothing to wait on.
+    let s:preview.job = v:null
+    let s:preview.entry = ''
+    let s:preview.phase = 'stopped'
   endif
-  let s:preview.job = v:null
-  let s:preview.entry = ''
-  let s:preview.address = ''
-  let s:preview.status = 'stopped'
 endfunction
 
 function! TypstPreviewRestart() abort
@@ -205,27 +298,93 @@ function! TypstPreviewRestart() abort
   call TypstPreviewStart()
 endfunction
 
+" A cached phase is not liveness evidence by itself: job_status() polls the
+" OS directly and can observe a dead process before the asynchronous
+" exit_cb for it has run. Status must never assert a browser-ready service
+" for a job that is actually gone, even for the brief window before its
+" own exit callback catches up.
+function! s:ReconciledPhase() abort
+  let l:job_status = s:preview.job is v:null ? 'no-job' : job_status(s:preview.job)
+  if s:preview.phase =~# '^\(starting\|listening\)$' && l:job_status !=# 'run'
+    return 'failed (job ' . l:job_status . ', stale phase)'
+  endif
+  return s:preview.phase
+endfunction
+
 function! TypstPreviewStatus() abort
-  if s:preview.status ==# 'stopped'
+  if s:preview.phase ==# 'stopped'
     echom 'Typst preview: stopped'
     return
   endif
 
-  echom 'Typst preview: ' . s:preview.status
+  let l:job_status = s:preview.job is v:null ? 'no-job' : job_status(s:preview.job)
+  echom 'Typst preview: ' . s:ReconciledPhase()
+        \ . ' | job=' . l:job_status
         \ . ' | entry=' . s:preview.entry
-        \ . ' | address=' . s:preview.address
+        \ . ' | bind=' . s:preview.bind
+        \ . ' | url=' . s:preview.public_url
+        \ . ' | observed=' . (empty(s:preview.observed_listener) ? '(none)' : s:preview.observed_listener)
         \ . (empty(s:preview.last_error) ? '' : ' | last=' . s:preview.last_error)
 endfunction
 
 function! TypstPreviewOpen() abort
-  if s:preview.status !=# 'listening'
-    echoerr 'Typst preview is not listening yet. Run :TypstPreviewStart, then :TypstPreviewStatus.'
+  if s:ReconciledPhase() !=# 'listening'
+    echoerr 'Typst preview is not verified listening (phase=' . s:ReconciledPhase() . '). Run :TypstPreview start, then :TypstPreview status.'
     return
   endif
 
-  echom 'http://' . s:preview.address . '/'
+  echom s:preview.public_url
 endfunction
 
+" --- :TypstPreview {start|stop|restart|status|open|help} -------------------
+" One discoverable, tab-completable entry point instead of five unrelated
+" Ex command names. The underlying TypstPreview{Start,Stop,...} commands
+" remain as thin compatibility aliases -- not a second implementation --
+" but documentation teaches only this grammar.
+function! s:TypstPreviewHelp() abort
+  echo ':TypstPreview {start|stop|restart|status|open|help}' . "\n"
+        \ . '  start    start the preview for the current entrypoint (no-op if already running for it)' . "\n"
+        \ . '  stop     stop the owned preview job' . "\n"
+        \ . '  restart  stop then start (recovery)' . "\n"
+        \ . '  status   phase, job state, entrypoint, bind/public URL, last error' . "\n"
+        \ . '  open     echo the public preview URL (never opens a local browser)' . "\n"
+        \ . '  help     this message (also -h / --help / bare :TypstPreview)' . "\n"
+        \ . '' . "\n"
+        \ . 'Current: phase=' . s:ReconciledPhase() . ' entry=' . (empty(s:preview.entry) ? '(none)' : s:preview.entry) . "\n"
+        \ . '  bind=' . g:typst_preview_bind . ' url=' . g:typst_preview_url . "\n"
+        \ . "\n"
+        \ . ':TypstLiveWriteToggle toggles buffer-local autosave-after-quiet-pause (off by default).'
+endfunction
+
+function! TypstPreviewDispatch(args) abort
+  let l:sub = trim(a:args)
+
+  if empty(l:sub) || l:sub ==# 'help' || l:sub ==# '-h' || l:sub ==# '--help'
+    call s:TypstPreviewHelp()
+  elseif l:sub ==# 'start'
+    call TypstPreviewStart()
+  elseif l:sub ==# 'stop'
+    call TypstPreviewStop()
+  elseif l:sub ==# 'restart'
+    call TypstPreviewRestart()
+  elseif l:sub ==# 'status'
+    call TypstPreviewStatus()
+  elseif l:sub ==# 'open'
+    call TypstPreviewOpen()
+  else
+    echoerr 'Unknown :TypstPreview subcommand: ' . l:sub . '. Try :TypstPreview help.'
+  endif
+endfunction
+
+function! TypstPreviewComplete(arglead, cmdline, cursorpos) abort
+  let l:subs = ['start', 'stop', 'restart', 'status', 'open', 'help']
+  return filter(copy(l:subs), 'stridx(v:val, a:arglead) == 0')
+endfunction
+
+command! -nargs=? -complete=customlist,TypstPreviewComplete TypstPreview
+      \ call TypstPreviewDispatch(<q-args>)
+
+" Compatibility aliases: thin wrappers, not independent implementations.
 command! TypstPreviewStart call TypstPreviewStart()
 command! TypstPreviewStop call TypstPreviewStop()
 command! TypstPreviewRestart call TypstPreviewRestart()
@@ -247,7 +406,13 @@ augroup typst_preview_lifecycle
   " workaround for an external watcher's inode tracking, not a general
   " editor preference.
   autocmd FileType typst setlocal backupcopy=yes
-  autocmd FileType typst call TypstPreviewStart(1)
+  " <abuf> is captured at the autocmd boundary and threaded through
+  " explicitly, rather than letting s:MaybeStartForBuffer re-derive "the"
+  " buffer from ambient '%' state -- FileType fires synchronously for the
+  " buffer whose filetype just changed, so this is not currently a source
+  " of divergence, but it is the one boundary both this hook and an
+  " explicit :TypstPreview start now go through identically.
+  autocmd FileType typst call s:MaybeStartForBuffer(str2nr(expand('<abuf>')), 1)
   autocmd VimLeavePre * call TypstPreviewStop()
 augroup END
 
@@ -258,65 +423,24 @@ augroup END
 " silently rewritten because live-write was left on in a previous session).
 let g:typst_live_write_quiet_ms = get(g:, 'typst_live_write_quiet_ms', 700)
 
-" Bound to the buffer that scheduled it (via the Funcref partial below), not
-" read from "the current buffer" -- a timer callback runs in whatever
-" buffer/window is current when it fires, which is not necessarily the one
-" that was being edited 700ms ago. Acting on b:/&modified/:update directly
-" here would silently check or save the wrong buffer if the user switched
-" away during the quiet interval.
+" Active-buffer-only contract: a scheduled write only ever fires while its
+" buffer is still the current buffer in the current window. There is no
+" cross-tab search and no hidden-buffer window-borrowing here -- the
+" BufLeave hook below synchronously flushes and cancels the timer the
+" moment the buffer stops being the active one, instead of trying to
+" reach it again later wherever it ends up. "Debounced write while
+" actively authoring this buffer" does not have to mean "keep finding and
+" background-saving it after the user's attention has moved elsewhere";
+" the stronger contract this replaced needed real window-borrowing/keepalt
+" machinery to reach a buffer with no window at all, which is a lot of
+" surface for a guarantee this feature never actually promised.
 function! s:LiveWriteTick(bufnr, timer) abort
-  if !bufloaded(a:bufnr) || !getbufvar(a:bufnr, 'typst_live_write', 0)
+  if bufnr('%') !=# a:bufnr || !get(b:, 'typst_live_write', 0)
     return
   endif
 
-  let l:modified = getbufvar(a:bufnr, '&modified')
-  let l:readonly = getbufvar(a:bufnr, '&readonly')
-  let l:buftype = getbufvar(a:bufnr, '&buftype')
-
-  if l:modified && !l:readonly && l:buftype ==# '' && !empty(bufname(a:bufnr))
-    " bufwinid() only searches the current tab page; win_findbuf() searches
-    " all of them, so a buffer left open in another tab during the quiet
-    " interval still gets its scheduled write instead of being silently
-    " skipped.
-    let l:winid = get(win_findbuf(a:bufnr), 0, -1)
-    if l:winid != -1
-      call win_execute(l:winid, 'update')
-    else
-      " Loaded but displayed nowhere at all (e.g. :hide'd, or 'hidden' is
-      " set and the user moved on without closing it) -- win_findbuf()
-      " can't find a window to run :update in because there isn't one.
-      " Borrow the current window just long enough to write it, with
-      " :noautocmd so this doesn't fire FileType/Buf-Enter/Leave for
-      " either buffer or trigger this same live-write machinery
-      " recursively, and restore the original buffer afterward either way.
-      "
-      " The switch itself needs `hide`: with the default 'nohidden', a
-      " plain `:buffer` refuses to abandon the *current* window's buffer
-      " if that one is also modified (E37), which would silently drop
-      " the write we came here to do. `:hide {cmd}` runs {cmd} with
-      " 'hidden' in effect just for that command, so switching away
-      " (either direction) never requires saving anything.
-      let l:original = bufnr('%')
-      if l:original ==# a:bufnr
-        update
-      else
-        try
-          " The modifiers must be part of the string :execute runs, not
-          " prefixed on :execute itself -- `noautocmd hide execute '...'`
-          " does not propagate either modifier into the command the
-          " string builds and still throws E37 here; confirmed directly.
-          " `keepalt` on both switches keeps this borrow invisible to
-          " window navigation too -- without it, restoring the original
-          " buffer would leave the hidden Typst buffer as the window's
-          " new alternate file (`:b#`/<C-^>), clobbering whatever the
-          " user actually had there before this ran.
-          execute 'keepalt noautocmd hide buffer' a:bufnr
-          update
-        finally
-          execute 'keepalt noautocmd hide buffer' l:original
-        endtry
-      endif
-    endif
+  if &modified && !&readonly && &buftype ==# '' && !empty(bufname('%'))
+    update
   endif
 endfunction
 
@@ -334,14 +458,42 @@ function! s:LiveWriteSchedule() abort
         \ function('s:LiveWriteTick', [bufnr('%')]))
 endfunction
 
+" Fires while the leaving buffer is still current (:help BufLeave): safe to
+" act on ambient '%'/&-option state directly here, unlike BufUnload/
+" BufDelete below, whose docs explicitly warn '%' may already differ from
+" the buffer being unloaded.
+function! s:LiveWriteFlushAndCancel() abort
+  if exists('b:typst_live_write_timer')
+    call timer_stop(b:typst_live_write_timer)
+    unlet b:typst_live_write_timer
+  endif
+
+  if get(b:, 'typst_live_write', 0) && &modified && !&readonly && &buftype ==# '' && !empty(bufname('%'))
+    update
+  endif
+endfunction
+
+" BufUnload/BufDelete: cancel only, addressed by buffer number rather than
+" ambient '%' (which the buffer being unloaded may not be), and without
+" attempting a flush -- a buffer on its way out that was never properly
+" left first (bypassing BufLeave) is already an unusual path; the timer
+" itself must still not leak, but inventing a safe write there is not the
+" job of an unload hook.
+function! s:LiveWriteCancelForBuffer(bufnr) abort
+  let l:timer = getbufvar(a:bufnr, 'typst_live_write_timer', 0)
+  if l:timer isnot 0
+    call timer_stop(l:timer)
+  endif
+endfunction
+
 function! TypstLiveWriteToggle() abort
-  if !s:IsTypstBuffer()
+  if !s:IsTypstBufnr(bufnr('%'))
     echoerr 'Not a Typst buffer.'
     return
   endif
 
   let b:typst_live_write = !get(b:, 'typst_live_write', 0)
-  echom 'Typst live-write: ' . (b:typst_live_write ? 'on (autosaves after a quiet pause)' : 'off (manual-save)')
+  echom 'Typst live-write: ' . (b:typst_live_write ? 'on (autosaves after a quiet pause, active buffer only)' : 'off (manual-save)')
 endfunction
 
 command! TypstLiveWriteToggle call TypstLiveWriteToggle()
@@ -349,10 +501,8 @@ command! TypstLiveWriteToggle call TypstLiveWriteToggle()
 augroup typst_live_write
   autocmd!
   autocmd TextChanged,TextChangedI *.typ call s:LiveWriteSchedule()
-  autocmd BufUnload,BufDelete *.typ
-        \ if exists('b:typst_live_write_timer') |
-        \   call timer_stop(b:typst_live_write_timer) |
-        \ endif
+  autocmd BufLeave *.typ call s:LiveWriteFlushAndCancel()
+  autocmd BufUnload,BufDelete *.typ call s:LiveWriteCancelForBuffer(str2nr(expand('<abuf>')))
 augroup END
 
 " --- Keyboard grammar: structural snippets only -----------------------------
@@ -360,14 +510,28 @@ augroup END
 " `^`, named symbols via completion) -- snippets exist only for the
 " repetitive *structure* around that syntax (bounds, jump points), not as a
 " LaTeX-compatibility layer or a stand-in for completion.
-let g:vsnip_snippet_dir = expand('<sfile>:h') . '/snippets'
+"
+" `g:vsnip_snippet_dir` (singular) is vsnip's own primary, user-editable
+" snippet directory (default `~/.vsnip`); overwriting it here would
+" displace whatever the user already has there. `g:vsnip_snippet_dirs`
+" (plural, a list) is the additive slot vsnip merges alongside it --
+" confirmed directly against the pinned vsnip source
+" (autoload/vsnip/source/{user_snippet,snipmate}.vim both read `+= [g:vsnip_snippet_dir]`
+" then `+= g:vsnip_snippet_dirs`), so appending here can only add sources,
+" never remove the user's own.
+let g:vsnip_snippet_dirs = get(g:, 'vsnip_snippet_dirs', []) + [expand('<sfile>:h') . '/snippets']
 
-" <C-j> does both expand and next-placeholder (matching docs/typst-math-
-" workflow.md): try expand first, then forward-jump, else fall through to
-" a literal <C-j>. Previously only expand was wired to it and forward-jump
-" lived solely on the undocumented <C-l>, so <C-j> silently inserted a
-" newline mid-snippet instead of advancing.
-imap <expr> <C-j> vsnip#expandable()  ? '<Plug>(vsnip-expand)'    : vsnip#jumpable(1)  ? '<Plug>(vsnip-jump-next)' : '<C-j>'
-smap <expr> <C-j> vsnip#expandable()  ? '<Plug>(vsnip-expand)'    : vsnip#jumpable(1)  ? '<Plug>(vsnip-jump-next)' : '<C-j>'
-imap <expr> <C-h> vsnip#jumpable(-1)  ? '<Plug>(vsnip-jump-prev)' : '<C-h>'
-smap <expr> <C-h> vsnip#jumpable(-1)  ? '<Plug>(vsnip-jump-prev)' : '<C-h>'
+augroup typst_vsnip_mappings
+  autocmd!
+  " Buffer-local to Typst: these are structural-snippet bindings for this
+  " filetype's grammar specifically, not a global editor default that
+  " every other filetype should inherit just because this file loaded.
+  "
+  " <C-j> does both expand and next-placeholder (matching docs/typst-math-
+  " workflow.md): try expand first, then forward-jump, else fall through to
+  " a literal <C-j>.
+  autocmd FileType typst imap <buffer><expr> <C-j> vsnip#expandable() ? '<Plug>(vsnip-expand)' : vsnip#jumpable(1) ? '<Plug>(vsnip-jump-next)' : '<C-j>'
+  autocmd FileType typst smap <buffer><expr> <C-j> vsnip#expandable() ? '<Plug>(vsnip-expand)' : vsnip#jumpable(1) ? '<Plug>(vsnip-jump-next)' : '<C-j>'
+  autocmd FileType typst imap <buffer><expr> <C-h> vsnip#jumpable(-1) ? '<Plug>(vsnip-jump-prev)' : '<C-h>'
+  autocmd FileType typst smap <buffer><expr> <C-h> vsnip#jumpable(-1) ? '<Plug>(vsnip-jump-prev)' : '<C-h>'
+augroup END
