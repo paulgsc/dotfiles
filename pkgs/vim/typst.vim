@@ -202,13 +202,23 @@ endif
 " own output -- carries both the desired target and the job's actual entry,
 " letting a stale-target trace be told apart from a stale-job one.
 function! s:LogPreviewEvent(msg) abort
-  call s:EnsureLogDir()
-  call writefile([strftime('%Y-%m-%d %H:%M:%S')
-        \ . ' gen=' . s:preview.generation
-        \ . ' phase=' . s:preview.phase
-        \ . ' desired=' . (empty(s:preview.desired_entry) ? '(none)' : s:preview.desired_entry)
-        \ . ' entry=' . (empty(s:preview.entry) ? '(none)' : s:preview.entry)
-        \ . ' ' . a:msg], g:typst_preview_log_file, 'a')
+  " Best-effort only: this is an `abort` function called from other
+  " `abort` functions (s:ConvergePreview among them) *before* they issue
+  " the actual job_stop()/job_start() -- an unwritable log path or a full
+  " state filesystem must never propagate out of here and cut off the
+  " caller's own remaining lines, or a stop/start request could silently
+  " never be issued at all. See :TypstPreview status for the alternative
+  " signal when logging itself is failing.
+  try
+    call s:EnsureLogDir()
+    call writefile([strftime('%Y-%m-%d %H:%M:%S')
+          \ . ' gen=' . s:preview.generation
+          \ . ' phase=' . s:preview.phase
+          \ . ' desired=' . (empty(s:preview.desired_entry) ? '(none)' : s:preview.desired_entry)
+          \ . ' entry=' . (empty(s:preview.entry) ? '(none)' : s:preview.entry)
+          \ . ' ' . a:msg], g:typst_preview_log_file, 'a')
+  catch
+  endtry
 endfunction
 
 " Tinymist logs exclusively to stderr, not stdout (verified against the
@@ -484,7 +494,16 @@ endfunction
 " so the current target is left untouched. This is also what keeps
 " :TypstPreview logs' own terminal buffer from stopping the very preview
 " its stream belongs to.
-function! s:ObserveBuffer(bufnr, auto) abort
+"
+" a:is_navigation: 1 for BufEnter/FileType (a real arrival at this buffer,
+" which is what ":stop ... until ... a later leave/re-enter navigation
+" event" means -- see TypstPreviewStop), 0 for BufWritePost (a mere save
+" of the buffer you never left). Without this distinction, saving again in
+" a buffer you explicitly stopped would resurrect the preview merely
+" because BufWritePost re-derives the same desired target BufEnter would
+" have -- the write itself is not navigation, so it must not undo an
+" explicit stop the way leaving and coming back does.
+function! s:ObserveBuffer(bufnr, auto, is_navigation) abort
   if a:bufnr != bufnr('%')
     " Guards the FileType observer in particular: filetype can be set on a
     " buffer that is not the current one (a background read, another
@@ -497,11 +516,18 @@ function! s:ObserveBuffer(bufnr, auto) abort
     return
   endif
 
-  if getbufvar(a:bufnr, '&filetype') ==# 'typst'
-    call s:SetDesiredEntry(fnamemodify(bufname(a:bufnr), ':p'), a:auto)
-  else
+  if getbufvar(a:bufnr, '&filetype') !=# 'typst'
     call s:SetDesiredEntry('', a:auto)
+    return
   endif
+
+  if a:is_navigation
+    call setbufvar(a:bufnr, 'typst_preview_explicit_stop', 0)
+  elseif getbufvar(a:bufnr, 'typst_preview_explicit_stop', 0)
+    return
+  endif
+
+  call s:SetDesiredEntry(fnamemodify(bufname(a:bufnr), ':p'), a:auto)
 endfunction
 
 function! TypstPreviewStart(...) abort
@@ -530,10 +556,26 @@ function! TypstPreviewStart(...) abort
     echom 'Typst preview already running for ' . l:entry . ' at ' . s:preview.public_url
   endif
 
+  " An explicit start always supersedes any earlier explicit stop recorded
+  " for this buffer -- otherwise a save right after this start would still
+  " see the stale marker and refuse to reconcile (see s:ObserveBuffer).
+  call setbufvar(l:bufnr, 'typst_preview_explicit_stop', 0)
   call s:SetDesiredEntry(l:entry, l:auto)
 endfunction
 
 function! TypstPreviewStop() abort
+  " Marks whichever buffer actually owns the entry being stopped -- not
+  " necessarily bufnr('%'): :stop is not restricted to being invoked from
+  " the previewed buffer itself. This is what makes "stays stopped until
+  " :start or a later leave/re-enter" (see s:ObserveBuffer) survive a
+  " plain :w in that buffer instead of being undone by the very next save.
+  let l:target = !empty(s:preview.desired_entry) ? s:preview.desired_entry : s:preview.entry
+  if !empty(l:target)
+    let l:target_bufnr = bufnr(l:target)
+    if l:target_bufnr >= 0
+      call setbufvar(l:target_bufnr, 'typst_preview_explicit_stop', 1)
+    endif
+  endif
   call s:SetDesiredEntry('', 0)
 endfunction
 
@@ -557,6 +599,7 @@ function! TypstPreviewRestart() abort
   " restarting the file already running, but restart means an explicit
   " stop+start even for that case.
   let s:preview.desired_entry = l:entry
+  call setbufvar(l:bufnr, 'typst_preview_explicit_stop', 0)
 
   if s:preview.job isnot v:null
     call s:RequestStop()
@@ -712,10 +755,13 @@ augroup typst_preview_lifecycle
   " fallback (s:ObserveBuffer's own bufnr('%') check keeps a background
   " buffer's FileType event from stealing the lease); BufWritePost is what
   " activates a brand-new Typst buffer once its first save makes it
-  " readable, and is a no-op for every save after that.
-  autocmd BufEnter * call s:ObserveBuffer(str2nr(expand('<abuf>')), 1)
-  autocmd FileType typst call s:ObserveBuffer(str2nr(expand('<abuf>')), 1)
-  autocmd BufWritePost *.typ call s:ObserveBuffer(str2nr(expand('<abuf>')), 1)
+  " readable, and is a no-op for every save after that. BufEnter/FileType
+  " pass is_navigation=1 (a real arrival, which may resume a buffer an
+  " explicit :stop left stopped); BufWritePost passes 0 (a mere save must
+  " not undo that same explicit stop).
+  autocmd BufEnter * call s:ObserveBuffer(str2nr(expand('<abuf>')), 1, 1)
+  autocmd FileType typst call s:ObserveBuffer(str2nr(expand('<abuf>')), 1, 1)
+  autocmd BufWritePost *.typ call s:ObserveBuffer(str2nr(expand('<abuf>')), 1, 0)
   " Deliberately no BufLeave handler here: a departure autocmd cannot see
   " the destination buffer, only that the current one is being left, so it
   " cannot tell a real replacement file apart from a transient surface

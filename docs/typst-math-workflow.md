@@ -399,7 +399,19 @@ those need a run on the real machine:
         automatically; `:TypstPreview restart` on an already-listening file
         forces a genuinely new PID; `:TypstPreview restart` invoked from a
         transient surface (a quickfix window) errors without touching the
-        still-healthy, still-same-PID job running elsewhere.
+        still-healthy, still-same-PID job running elsewhere;
+      - `:TypstPreview stop`, followed by a plain `:w` in the *same* buffer
+        (never left) — twice — stays `stopped`; leaving to an ordinary file
+        and back resumes it automatically as above; an explicit `start`
+        immediately after `stop` (again without leaving) also clears the
+        stop, and a subsequent resave keeps the same PID rather than
+        re-triggering a fresh start. A caught-in-review regression: an
+        earlier revision reconciled `BufWritePost` identically to
+        `BufEnter`/`FileType`, so a bare resave right after an explicit stop
+        silently restarted the preview from underneath the "stays stopped"
+        contract above — fixed by having only a real navigation event
+        (`BufEnter`/`FileType`) clear the buffer-local marker `stop` sets,
+        so a mere save can no longer undo it.
       One case was deliberately not hardened: refiring `FileType typst` on
       the *same* buffer without ever leaving it, immediately after an
       explicit `:TypstPreview stop`, does restart the preview in this
