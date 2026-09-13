@@ -537,13 +537,22 @@ function! s:ConvergePreview(auto) abort
 endfunction
 
 function! s:SetDesiredEntry(target, auto) abort
+  " Compared against the OLD value before it's overwritten below: an
+  " automatic re-observation of the *same* target (BufWritePost fires on
+  " every save, including a redundant resave of the file an explicit
+  " :TypstPreview restart is still waiting to stop before restarting; a
+  " duplicate FileType/BufEnter is another route) must not downgrade
+  " desired_auto if an explicit request already recorded 0 for it -- see
+  " s:OnPreviewExit, which reads this value once the actual (re)start is
+  " deferred there. An explicit call (auto=0) always wins outright,
+  " whether or not the target changed; only a *same-target*, *automatic*
+  " call is the one case that must leave an existing explicit marking
+  " alone rather than blindly overwriting it.
+  let l:same_target = a:target ==# s:preview.desired_entry
   let s:preview.desired_entry = a:target
-  " Remembered alongside the target itself so a later asynchronous
-  " continuation (s:OnPreviewExit, once an in-flight stop confirms) knows
-  " whether *this* desired_entry came from an explicit command or
-  " automatic navigation, even if the actual start happens well after this
-  " call returns.
-  let s:preview.desired_auto = a:auto
+  if !a:auto || !l:same_target
+    let s:preview.desired_auto = a:auto
+  endif
   call s:ConvergePreview(a:auto)
 endfunction
 

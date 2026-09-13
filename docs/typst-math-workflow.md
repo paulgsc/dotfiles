@@ -428,7 +428,23 @@ those need a run on the real machine:
         (set together in `s:SetDesiredEntry`, and directly in
         `TypstPreviewRestart`'s direct-assignment path) and having
         `s:OnPreviewExit` reconverge with `s:preview.desired_auto` instead
-        of a hardcoded value;
+        of a hardcoded value. A closing-review pass then caught the
+        obvious follow-on gap in that same fix: `s:SetDesiredEntry` was
+        still unconditionally overwriting `desired_auto` on *every* call,
+        so an automatic re-observation of the exact same target (a
+        `BufWritePost` firing on a plain resave of the very file an
+        explicit `restart` was still waiting to stop, or a duplicate
+        `FileType`/`BufEnter`) would silently flip a recorded explicit `0`
+        back to automatic `1` while the real (re)start was still pending —
+        undoing the fix above through a slightly different door. Fixed by
+        only overwriting `desired_auto` when the call is itself explicit
+        or the target actually changed; a same-target automatic call now
+        leaves whatever origin is already recorded alone. Confirmed with
+        the precise failing sequence: `restart` a listening file (desired
+        target unchanged, `desired_auto=0`), resave that same buffer while
+        the old job is still exiting (`desired_auto` stays `0`, not
+        clobbered to `1`), then break `bind`/`url` before the deferred
+        start lands — the validation failure still reaches `echoerr`;
       - re-sourcing this file while a preview started by a version of it
         predating `desired_entry` is still running no longer leaves the
         preview stuck: that job's `err_cb`/`exit_cb` are permanently bound
