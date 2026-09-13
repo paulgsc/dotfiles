@@ -411,7 +411,39 @@ those need a run on the real machine:
         silently restarted the preview from underneath the "stays stopped"
         contract above — fixed by having only a real navigation event
         (`BufEnter`/`FileType`) clear the buffer-local marker `stop` sets,
-        so a mere save can no longer undo it.
+        so a mere save can no longer undo it;
+      - an explicit `:TypstPreview restart` whose actual (re)start is
+        deferred to `s:OnPreviewExit`'s continuation (it raced a
+        still-in-flight stop, or the file was already listening and
+        restart forces a fresh stop+start) still reports a bind/url
+        validation failure via `echoerr`, not just `phase=failed` silently
+        — confirmed by restarting a listening file after deliberately
+        mismatching `g:typst_preview_bind`/`g:typst_preview_url`. Another
+        caught-in-review regression: the original PR #43 code passed a
+        hardcoded `0` (explicit) through this exact deferred continuation
+        for precisely this reason; the active-buffer-lease rewrite
+        hardcoded `1` (automatic, quiet) instead, silently downgrading an
+        explicit restart's failure to something only visible via `status`.
+        Fixed by recording `desired_auto` alongside `desired_entry` itself
+        (set together in `s:SetDesiredEntry`, and directly in
+        `TypstPreviewRestart`'s direct-assignment path) and having
+        `s:OnPreviewExit` reconverge with `s:preview.desired_auto` instead
+        of a hardcoded value;
+      - re-sourcing this file while a preview started by a version of it
+        predating `desired_entry` is still running no longer leaves the
+        preview stuck: that job's `exit_cb` is permanently bound to the old
+        script instance's own (`pending_start`-based) callback, which the
+        new code cannot retarget, so the new code stops that inherited job
+        once, at the moment the old-shaped dictionary is detected — the
+        very next navigation or save then starts cleanly under the new
+        code. Confirmed by actually sourcing the pre-this-PR `typst.vim`,
+        starting a preview under it, then sourcing the current file on top
+        while that job was still listening, then navigating to a different
+        file: the inherited job stopped and the new target started with a
+        fresh PID. A plain re-source of an *already*-migrated file (the
+        common case — rebuilding after an unrelated edit) leaves a healthy
+        running preview completely untouched, since the migration guard
+        only fires once, the first time this shape of state is inherited.
       One case was deliberately not hardened: refiring `FileType typst` on
       the *same* buffer without ever leaving it, immediately after an
       explicit `:TypstPreview stop`, does restart the preview in this

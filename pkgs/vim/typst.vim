@@ -173,6 +173,7 @@ if !exists('g:_typst_preview_state')
         \ 'generation': 0,
         \ 'entry': '',
         \ 'desired_entry': '',
+        \ 'desired_auto': 0,
         \ 'bind': '',
         \ 'public_url': '',
         \ 'phase': 'stopped',
@@ -190,12 +191,41 @@ let s:preview = g:_typst_preview_state
 
 " g:_typst_preview_state survives a plain `:source $MYVIMRC` (see above),
 " so a dict created by an older version of this file -- before
-" 'desired_entry' existed -- is not recreated by the guard above and would
-" otherwise be missing this key entirely, throwing E716 the first time any
-" function below reads it.
+" 'desired_entry'/'desired_auto' existed -- is not recreated by the guard
+" above and would otherwise be missing these keys entirely, throwing E716
+" the first time any function below reads them. Captured before either key
+" is added: this is also the signal for the inherited-job check below,
+" which needs to know whether this dict predates them, not whether it
+" still does after this block runs.
+let s:migrating_preview_state = !has_key(s:preview, 'desired_entry')
+
 if !has_key(s:preview, 'desired_entry')
   let s:preview.desired_entry = ''
 endif
+if !has_key(s:preview, 'desired_auto')
+  let s:preview.desired_auto = 0
+endif
+
+" A dict shaped like this was created by a version of this script whose
+" s:OnPreviewExit predates desired_entry-based reconciliation. If a job is
+" currently running, its exit_cb Funcref is still bound to that OLD
+" function -- Vim never rebinds an already-running job's callbacks just
+" because the script that started it was re-sourced -- and that old code
+" has no way to call the current s:ConvergePreview. Left alone, the first
+" switch requested under the new code would stop this job (job_stop()
+" itself works regardless of version), but the *old* exit_cb would then
+" just clear it without ever reconciling the new desired target, leaving
+" the preview stuck until some unrelated event happened to trigger
+" reconciliation. Stopping it once, right here where the incompatibility
+" is actually detected (inlined, not via s:RequestStop(), which is not
+" yet defined at this point in the script), means the very next
+" navigation or save starts fresh entirely under the new code path.
+if s:migrating_preview_state && s:preview.job isnot v:null && !s:preview.stopping
+  let s:preview.stopping = 1
+  let s:preview.phase = 'stopping'
+  call job_stop(s:preview.job, 'term')
+endif
+unlet s:migrating_preview_state
 
 " Shared by the tinymist stderr parser below and the reconciler's own
 " switch/stop decisions, so every asynchronous trace -- not just tinymist's
@@ -318,7 +348,14 @@ function! s:OnPreviewExit(generation, job, status) abort
     " possibly a different file than the one that triggered the stop, or
     " empty if the user has since navigated away from every Typst buffer --
     " rather than replaying a value captured back when the stop began.
-    call s:ConvergePreview(1)
+    "
+    " desired_auto (not a hardcoded 1) carries forward whether that latest
+    " desired_entry came from an explicit command or automatic navigation:
+    " an explicit :TypstPreview start/restart whose actual start is
+    " deferred to this exact continuation (it raced a still-in-flight stop)
+    " must still be able to echoerr a validation failure, exactly as if the
+    " stop had not still been in flight.
+    call s:ConvergePreview(s:preview.desired_auto)
   endif
   " An exit that was NOT requested (tinymist crashed on its own) must not
   " reconverge: desired_entry may still equal the crashed entry, and
@@ -483,6 +520,12 @@ endfunction
 
 function! s:SetDesiredEntry(target, auto) abort
   let s:preview.desired_entry = a:target
+  " Remembered alongside the target itself so a later asynchronous
+  " continuation (s:OnPreviewExit, once an in-flight stop confirms) knows
+  " whether *this* desired_entry came from an explicit command or
+  " automatic navigation, even if the actual start happens well after this
+  " call returns.
+  let s:preview.desired_auto = a:auto
   call s:ConvergePreview(a:auto)
 endfunction
 
@@ -597,8 +640,13 @@ function! TypstPreviewRestart() abort
   " Set directly rather than through s:SetDesiredEntry: that would converge
   " straight into s:ConvergePreview's "already owns desired" no-op when
   " restarting the file already running, but restart means an explicit
-  " stop+start even for that case.
+  " stop+start even for that case. desired_auto is still recorded (0, this
+  " is always explicit) so that if the actual start ends up deferred to
+  " s:OnPreviewExit's continuation -- restarting while the same or a
+  " different entry is still mid-shutdown -- a validation failure there
+  " still reports the way an explicit command promises.
   let s:preview.desired_entry = l:entry
+  let s:preview.desired_auto = 0
   call setbufvar(l:bufnr, 'typst_preview_explicit_stop', 0)
 
   if s:preview.job isnot v:null
