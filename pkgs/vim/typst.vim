@@ -208,22 +208,40 @@ endif
 
 " A dict shaped like this was created by a version of this script whose
 " s:OnPreviewExit predates desired_entry-based reconciliation. If a job is
-" currently running, its exit_cb Funcref is still bound to that OLD
-" function -- Vim never rebinds an already-running job's callbacks just
-" because the script that started it was re-sourced -- and that old code
-" has no way to call the current s:ConvergePreview. Left alone, the first
-" switch requested under the new code would stop this job (job_stop()
-" itself works regardless of version), but the *old* exit_cb would then
-" just clear it without ever reconciling the new desired target, leaving
-" the preview stuck until some unrelated event happened to trigger
-" reconciliation. Stopping it once, right here where the incompatibility
-" is actually detected (inlined, not via s:RequestStop(), which is not
-" yet defined at this point in the script), means the very next
-" navigation or save starts fresh entirely under the new code path.
-if s:migrating_preview_state && s:preview.job isnot v:null && !s:preview.stopping
-  let s:preview.stopping = 1
-  let s:preview.phase = 'stopping'
+" currently running (or already mid-stop under that old code -- checking
+" `stopping` and only acting when it is still 0 is NOT enough: an old stop
+" already requested but not yet confirmed hits exactly the same gap once
+" it does confirm), its err_cb/exit_cb Funcrefs are still bound to that OLD
+" script instance -- Vim never rebinds an already-running job's callbacks
+" just because the script that started it was re-sourced -- and that old
+" code has no way to call the current s:ConvergePreview. Left to the old
+" exit_cb alone, it would eventually clear the job while only ever
+" checking its own `pending_start` (which nothing sets anymore), never
+" reconciling whatever the new code's desired_entry has since become, and
+" the preview would stay stuck until an unrelated event happened to
+" trigger reconciliation.
+"
+" There is no Vim API to redirect a running job's already-registered
+" callbacks, so this cannot make the *old* exit_cb call into new code.
+" Instead: bump the generation so that stale callback -- whenever it
+" eventually fires, stopping already requested or not -- fails its own
+" generation check and becomes a complete no-op, and adopt "no job" as far
+" as the new code is concerned right now rather than waiting for it. This
+" is a one-time, synchronous exception to "let job_stop()/exit_cb be the
+" only serialization boundary": there is no callback left to serialize on.
+" The OS process may briefly still be exiting when the next start is
+" requested, which can show as one harmless, self-correcting "address
+" already in use" failure (already a handled, non-corrupting state) rather
+" than silent success -- a narrow trade-off for a narrow, one-time,
+" hot-reload-during-an-in-flight-stop edge case, not an ongoing one: a
+" plain re-source of an already-migrated dict never reaches this branch.
+if s:migrating_preview_state && s:preview.job isnot v:null
   call job_stop(s:preview.job, 'term')
+  let s:preview.generation += 1
+  let s:preview.job = v:null
+  let s:preview.stopping = 0
+  let s:preview.phase = 'stopped'
+  let s:preview.entry = ''
 endif
 unlet s:migrating_preview_state
 

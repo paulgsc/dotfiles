@@ -431,19 +431,39 @@ those need a run on the real machine:
         of a hardcoded value;
       - re-sourcing this file while a preview started by a version of it
         predating `desired_entry` is still running no longer leaves the
-        preview stuck: that job's `exit_cb` is permanently bound to the old
-        script instance's own (`pending_start`-based) callback, which the
-        new code cannot retarget, so the new code stops that inherited job
-        once, at the moment the old-shaped dictionary is detected — the
-        very next navigation or save then starts cleanly under the new
-        code. Confirmed by actually sourcing the pre-this-PR `typst.vim`,
-        starting a preview under it, then sourcing the current file on top
-        while that job was still listening, then navigating to a different
-        file: the inherited job stopped and the new target started with a
-        fresh PID. A plain re-source of an *already*-migrated file (the
-        common case — rebuilding after an unrelated edit) leaves a healthy
-        running preview completely untouched, since the migration guard
-        only fires once, the first time this shape of state is inherited.
+        preview stuck: that job's `err_cb`/`exit_cb` are permanently bound
+        to the old script instance's own (`pending_start`-based) callbacks,
+        which the new code cannot retarget, so on detecting an old-shaped
+        dictionary the new code requests that inherited job's termination,
+        bumps `generation` so the stale callback becomes a no-op whenever
+        it does eventually fire, and immediately adopts "no job" from its
+        own perspective rather than waiting on a callback it doesn't own —
+        there being no Vim API to redirect an already-running job's
+        callbacks, this is a deliberate, one-time exception to letting
+        `exit_cb` be the sole serialization boundary, scoped to exactly
+        this migration. This covers both an inherited job the old code
+        hadn't yet asked to stop, and — a distinct case a first pass at
+        this fix missed, since it only checked `!stopping` — one the old
+        code had *already* asked to stop but whose exit hadn't yet
+        confirmed at the moment of re-source; either way the old callback
+        would otherwise have cleared the job while only ever checking its
+        own `pending_start`, never the new `desired_entry`. Confirmed by
+        actually sourcing the pre-this-PR `typst.vim`, starting a preview
+        under it, then sourcing the current file on top — both while that
+        job was still plainly listening, and separately while its stop had
+        already been requested but not yet confirmed — then navigating to
+        a different file in both cases: the inherited job's slot cleared
+        immediately and the new target started cleanly with a fresh PID,
+        unaffected when the old (by then generation-stale) process actually
+        exited afterward. A plain re-source of an *already*-migrated file
+        (the common case — rebuilding after an unrelated edit) leaves a
+        healthy running preview completely untouched, since the migration
+        guard only fires once, the first time this shape of state is
+        inherited; the one accepted trade-off is that the very next start
+        request right after such a migration can occasionally race the old
+        process's actual OS-level exit and see one harmless "address
+        already in use" failure (already a handled, non-corrupting state)
+        before a subsequent retry succeeds.
       One case was deliberately not hardened: refiring `FileType typst` on
       the *same* buffer without ever leaving it, immediately after an
       explicit `:TypstPreview stop`, does restart the preview in this
