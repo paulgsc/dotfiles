@@ -7,7 +7,7 @@ services, not one hand-rolled "HMR" loop:
 | --- | --- | --- |
 | Typst grammar | `vimPlugins.typst-vim` | filetype detection, syntax, indent |
 | Semantic editing | ALE + an explicit `tinymist lsp` stdio definition (`pkgs/vim/typst.vim`) | diagnostics/completion from the in-memory buffer |
-| Live rendered preview | one persistent `tinymist preview` process per entrypoint | watches the saved file and pushes to the browser on its own |
+| Live rendered preview | at most one `tinymist preview` process, following the active Typst buffer | watches the saved file and pushes to the browser on its own |
 | Publication | manual `:w` by default; opt-in debounced `:update` per buffer | explicit, not silent autosave |
 
 Files: `pkgs/vim/typst.vim` (ALE definition, preview lifecycle, live-write
@@ -46,22 +46,31 @@ One discoverable, tab-completable entry point:
 :TypstPreview {start|stop|restart|status|open|help}
 ```
 
-- `start` — start once for the current buffer's entrypoint if not already
-  running; a no-op if it's already running for that same file. Also runs
-  automatically on `FileType typst`, but the automatic call is quiet about
-  the two cases that are routine rather than errors: an unsaved new
-  buffer, or a different entry already running a preview. Only an
-  explicit `start` reports those with an error.
-- `stop` — stop the owned preview job. Reports `stopping` immediately,
-  `stopped` only once the process has actually exited — `job_stop()` only
-  *requests* termination, so the port may still be held for a moment
-  after this returns.
-- `restart` — explicit stop+start, for recovery.
-- `status` — phase, actual `job_status()`, entrypoint, bind address,
-  public URL, the address Tinymist itself reported listening on, and the
-  last failure. A cached `starting`/`listening` phase is reconciled
-  against the live job status here, so this can never claim a
-  browser-ready service for a job that's actually dead.
+- `start` — validate the current buffer as a readable ordinary Typst file,
+  make it the desired preview target, and converge. A no-op (same PID) if
+  it's already running for that same file. Also runs automatically on
+  buffer navigation (see "Active-buffer lease" below); the automatic call
+  is quiet about the routine cases (an unsaved new buffer, a same-target
+  duplicate). Only an explicit `start` reports those with a message.
+- `stop` — clear the desired target and stop the owned preview job.
+  Reports `stopping` immediately, `stopped` only once the process has
+  actually exited — `job_stop()` only *requests* termination, so the port
+  may still be held for a moment after this returns. While you remain in
+  the same buffer, the preview stays stopped until an explicit `start` or
+  a later leave-and-return navigation.
+- `restart` — captures the current buffer's path, then stops and starts
+  it again even if it was already running (recovery). Invoking it from a
+  non-Typst or transient buffer is a plain error and never touches a
+  healthy preview running elsewhere.
+- `status` — phase, actual `job_status()`, **desired** entrypoint (the
+  latest buffer navigation selected) as well as **actual** entrypoint
+  (what the job currently is or is shutting down), bind address, public
+  URL, the address Tinymist itself reported listening on, and the last
+  failure. Desired and actual legitimately differ while switching,
+  stopping, or waiting for a new buffer's first save. A cached
+  `starting`/`listening` phase is reconciled against the live job status
+  here, so this can never claim a browser-ready service for a job that's
+  actually dead.
 - `open` — echoes the public preview URL to copy into the Windows
   browser. Refuses (with an error) unless the phase is verified
   `listening`, reconciled the same way. Never tries to launch a remote
@@ -69,8 +78,62 @@ One discoverable, tab-completable entry point:
 - `logs` — opens a Vim terminal following tinymist's persisted stderr
   live (`tail -F` on `g:typst_preview_log_file`) and echoes the exact log
   path first, so it can equally be `tail -F`'d from an adjacent tmux pane.
+  Entering this terminal buffer is itself a transient surface (see below)
+  and never stops the preview it's following.
 - `help` (also bare `:TypstPreview`, `-h`, `--help`) — the above in one
-  screen, plus the current phase/entry/bind/url/log path.
+  screen, plus the current phase/desired/entry/bind/url/log path.
+
+## Active-buffer lease
+
+The preview follows the current *ordinary* Typst file, not "whatever was
+opened first" (the [previous
+behavior](https://github.com/paulgsc/dotfiles/pull/43) kept one preview
+running until `VimLeavePre` regardless of what you switched to). A small
+reconciler in `typst.vim` (`s:ConvergePreview`) keeps one durable fact —
+`desired_entry`, the latest buffer navigation's target — and asynchronously
+makes the running job match it:
+
+- **Enter a saved `.typ` file** — it becomes the desired target. If a
+  different file's preview is running, that job gets exactly one stop
+  request; the new one starts once the old one has actually exited (never
+  two Tinymist processes at once, and never a start racing the old job's
+  port).
+- **Re-enter the file already being previewed** (duplicate `BufEnter`,
+  window/tab switch, a redundant filetype re-detection, a repeated save)
+  — a no-op: same PID, same job, nothing restarts.
+- **Enter a different saved `.typ` file** — the running job for the old
+  file stops; the new file starts once that stop is confirmed.
+- **Enter an ordinary non-Typst file** (`code.rs`, a `.nix` file, ...) —
+  the preview stops. There is no running job to switch to another file
+  later reopens.
+- **Enter a transient surface** — `:TypstPreview logs`' own terminal,
+  `:help`, a file picker (NERDTree/FZF), Fugitive's status buffer, a
+  quickfix/location-list window — none of these are replacement files, so
+  the current preview target is left exactly as it was. This is what lets
+  you browse for the next file, or watch the preview's own log stream,
+  without losing what's currently rendering.
+- **Enter a brand-new, unsaved Typst buffer** — it becomes the desired
+  target immediately, and any old preview stops, but nothing starts until
+  the buffer's first successful write makes it a readable file. Every
+  save after that first one is idempotent (same PID).
+- **Rapid navigation** (switching faster than a stop can complete)
+  collapses to whatever was *most recently* desired when the old job's
+  exit is finally confirmed — an intermediate file you passed through on
+  the way never starts.
+- **Exit Vim** — the owned job stops, as before.
+
+`:TypstPreview stop`/`restart` are explicit overrides of the same
+mechanism: `stop` clears the desired target outright (so it stays stopped
+in the current buffer until you `start` again or navigate away and back);
+`restart` keeps the current buffer as the desired target but forces a
+fresh process even though the reconciler would otherwise treat "already
+running this exact file" as a no-op.
+
+This intentionally does **not** try to retarget a running Tinymist process
+in place — the CLI entrypoint is fixed at process start, and the fixed
+public URL/port mean only one process is ever meant to be listening — so a
+file switch is always a serialized stop-then-start, never a live
+reconfiguration.
 
 `:TypstPreviewStart`/`Stop`/`Restart`/`Status`/`Open` remain as thin
 compatibility aliases for the equivalent subcommand, but this document and
@@ -303,12 +366,130 @@ those need a run on the real machine:
       normal async exit path rather than a synchronous `job_start()`
       failure — the synchronous check is retained regardless, since
       `:help job_start()` documents it as possible on other platforms).
-- [x] Leaving the exercise buffer for another buffer does not stop the
-      preview; starting the same entrypoint twice is a no-op; opening a
-      second, different `.typ` file while a preview is running elsewhere
-      is silent (not an error) when triggered by `FileType`, but still
-      errors on an explicit `:TypstPreview start`; `VimLeavePre` stops the
-      owned preview job.
+- [x] **Active-buffer lease**, driven end to end through Vim's real
+      `job_start`/`job_stop`/`err_cb`/`exit_cb` machinery against a fake
+      `tinymist` standing in for the pinned binary (prints the same
+      "Static file server listening on" stderr line, holds until `SIGTERM`,
+      then exits after a deliberate delay so the asynchronous shutdown
+      window is real, not simulated) — not a re-implementation, the actual
+      `pkgs/vim/typst.vim` sourced with `ale#`/`vsnip#` autoload stubs:
+      - entering a saved file starts it; every duplicate route (explicit
+        `start`, a redundant `FileType` re-fire, opening and closing a
+        quickfix window while the buffer stays current) leaves the same OS
+        PID, same job, same `generation` untouched;
+      - entering a different saved file requests exactly one stop of the
+        old job and starts the new one only after that exit is confirmed
+        (observed serialized in the old job's own timestamped log: `EXIT`
+        for A strictly before `START` for B, never overlapping);
+      - entering an ordinary non-Typst file stops the preview with no
+        replacement;
+      - opening/closing a quickfix window while a file is being previewed
+        never changes `desired`/`entry`/the job's PID;
+      - rapid navigation collapses correctly in both directions verified:
+        A → B → (ordinary file) before A's exit completes starts neither B
+        nor anything else once the dust settles, and A → B → D before A's
+        exit completes starts D exactly once and B never starts at all —
+        in both cases `desired_entry` was overwritten twice during a single
+        in-flight shutdown and only its final value was ever acted on;
+      - a brand-new unsaved buffer stays `stopped` with no job for 100ms
+        after `FileType typst` fires, starts on its first `:write`, and
+        two further saves keep the same PID;
+      - `:TypstPreview stop` reaches `stopped` with `desired=(none)`;
+        leaving to an ordinary file and back to the same buffer resumes
+        automatically; `:TypstPreview restart` on an already-listening file
+        forces a genuinely new PID; `:TypstPreview restart` invoked from a
+        transient surface (a quickfix window) errors without touching the
+        still-healthy, still-same-PID job running elsewhere;
+      - `:TypstPreview stop`, followed by a plain `:w` in the *same* buffer
+        (never left) — twice — stays `stopped`; leaving to an ordinary file
+        and back resumes it automatically as above; an explicit `start`
+        immediately after `stop` (again without leaving) also clears the
+        stop, and a subsequent resave keeps the same PID rather than
+        re-triggering a fresh start. A caught-in-review regression: an
+        earlier revision reconciled `BufWritePost` identically to
+        `BufEnter`/`FileType`, so a bare resave right after an explicit stop
+        silently restarted the preview from underneath the "stays stopped"
+        contract above — fixed by having only a real navigation event
+        (`BufEnter`/`FileType`) clear the buffer-local marker `stop` sets,
+        so a mere save can no longer undo it;
+      - an explicit `:TypstPreview restart` whose actual (re)start is
+        deferred to `s:OnPreviewExit`'s continuation (it raced a
+        still-in-flight stop, or the file was already listening and
+        restart forces a fresh stop+start) still reports a bind/url
+        validation failure via `echoerr`, not just `phase=failed` silently
+        — confirmed by restarting a listening file after deliberately
+        mismatching `g:typst_preview_bind`/`g:typst_preview_url`. Another
+        caught-in-review regression: the original PR #43 code passed a
+        hardcoded `0` (explicit) through this exact deferred continuation
+        for precisely this reason; the active-buffer-lease rewrite
+        hardcoded `1` (automatic, quiet) instead, silently downgrading an
+        explicit restart's failure to something only visible via `status`.
+        Fixed by recording `desired_auto` alongside `desired_entry` itself
+        (set together in `s:SetDesiredEntry`, and directly in
+        `TypstPreviewRestart`'s direct-assignment path) and having
+        `s:OnPreviewExit` reconverge with `s:preview.desired_auto` instead
+        of a hardcoded value. A closing-review pass then caught the
+        obvious follow-on gap in that same fix: `s:SetDesiredEntry` was
+        still unconditionally overwriting `desired_auto` on *every* call,
+        so an automatic re-observation of the exact same target (a
+        `BufWritePost` firing on a plain resave of the very file an
+        explicit `restart` was still waiting to stop, or a duplicate
+        `FileType`/`BufEnter`) would silently flip a recorded explicit `0`
+        back to automatic `1` while the real (re)start was still pending —
+        undoing the fix above through a slightly different door. Fixed by
+        only overwriting `desired_auto` when the call is itself explicit
+        or the target actually changed; a same-target automatic call now
+        leaves whatever origin is already recorded alone. Confirmed with
+        the precise failing sequence: `restart` a listening file (desired
+        target unchanged, `desired_auto=0`), resave that same buffer while
+        the old job is still exiting (`desired_auto` stays `0`, not
+        clobbered to `1`), then break `bind`/`url` before the deferred
+        start lands — the validation failure still reaches `echoerr`;
+      - re-sourcing this file while a preview started by a version of it
+        predating `desired_entry` is still running no longer leaves the
+        preview stuck: that job's `err_cb`/`exit_cb` are permanently bound
+        to the old script instance's own (`pending_start`-based) callbacks,
+        which the new code cannot retarget, so on detecting an old-shaped
+        dictionary the new code requests that inherited job's termination,
+        bumps `generation` so the stale callback becomes a no-op whenever
+        it does eventually fire, and immediately adopts "no job" from its
+        own perspective rather than waiting on a callback it doesn't own —
+        there being no Vim API to redirect an already-running job's
+        callbacks, this is a deliberate, one-time exception to letting
+        `exit_cb` be the sole serialization boundary, scoped to exactly
+        this migration. This covers both an inherited job the old code
+        hadn't yet asked to stop, and — a distinct case a first pass at
+        this fix missed, since it only checked `!stopping` — one the old
+        code had *already* asked to stop but whose exit hadn't yet
+        confirmed at the moment of re-source; either way the old callback
+        would otherwise have cleared the job while only ever checking its
+        own `pending_start`, never the new `desired_entry`. Confirmed by
+        actually sourcing the pre-this-PR `typst.vim`, starting a preview
+        under it, then sourcing the current file on top — both while that
+        job was still plainly listening, and separately while its stop had
+        already been requested but not yet confirmed — then navigating to
+        a different file in both cases: the inherited job's slot cleared
+        immediately and the new target started cleanly with a fresh PID,
+        unaffected when the old (by then generation-stale) process actually
+        exited afterward. A plain re-source of an *already*-migrated file
+        (the common case — rebuilding after an unrelated edit) leaves a
+        healthy running preview completely untouched, since the migration
+        guard only fires once, the first time this shape of state is
+        inherited; the one accepted trade-off is that the very next start
+        request right after such a migration can occasionally race the old
+        process's actual OS-level exit and see one harmless "address
+        already in use" failure (already a handled, non-corrupting state)
+        before a subsequent retry succeeds.
+      One case was deliberately not hardened: refiring `FileType typst` on
+      the *same* buffer without ever leaving it, immediately after an
+      explicit `:TypstPreview stop`, does restart the preview in this
+      implementation, rather than staying stopped. Real Vim does not raise
+      `BufEnter`/`FileType` for a buffer you never left, so this has no
+      realistic trigger under `typst-vim`'s normal one-time filetype
+      detection; tracking "was this buffer actually re-entered" separately
+      from "what does this buffer's current state say" would be exactly
+      the kind of second, event-shaped state variable this design
+      deliberately avoided. Noted here rather than silently decided.
 - [x] `:TypstLiveWriteToggle`'s active-buffer-only contract: a burst of
       typing produces exactly one `:update` after the configured quiet
       interval while the buffer stays current (not one per keystroke);
@@ -333,6 +514,18 @@ those need a run on the real machine:
       negative check, that `:TypstPreview logs` (or `status`) visibly
       reports the old failure mode if `bind` is temporarily reset to
       `0.0.0.0:3141`.
+- [ ] **Needs the real host:** browser continuity across a target switch.
+      With the preview page already open and rendering file A, navigating
+      Vim to file B should eventually render B in the *same* browser tab
+      with no manual reload — the pinned Tinymist frontend's WebSocket
+      client retries a closed connection after one second
+      ([`tools/typst-preview-frontend/src/ws.ts`](https://github.com/Myriad-Dreamin/tinymist/blob/v0.14.18/tools/typst-preview-frontend/src/ws.ts)),
+      which is evidence the reconnect is plausible, not proof it renders.
+      Confirm: open the URL once, see A, switch Vim to B, watch the
+      WebSocket disconnect/retry/reconnect in the browser's network panel,
+      and see B actually rendered (not just a reconnected-but-blank page);
+      then switch to an ordinary file and confirm the tab goes
+      unavailable/errors rather than showing stale content.
 - [ ] **Needs the real host:** `ss -ltnp | grep 3141` after
       `home-manager switch`, to confirm the address actually bound matches
       what's configured, and specifically that binding literally to the

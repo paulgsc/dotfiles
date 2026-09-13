@@ -12,6 +12,9 @@
 "   - Bind address (what Tinymist is told to listen on) and public URL
 "     (what the browser is told to visit) are modeled as separate facts,
 "     never inferred from each other -- see :TypstPreview status.
+"   - The preview follows an active-ordinary-file lease: the current saved
+"     Typst buffer is the desired target, and a reconciler asynchronously
+"     makes the running job match it. See s:ConvergePreview() below.
 
 " --- ALE: register Tinymist as a real stdio LSP for Typst -----------------
 " Upstream ALE (pinned via vimPlugins.ale) ships a `typstyle` *fixer* for
@@ -169,6 +172,8 @@ if !exists('g:_typst_preview_state')
         \ 'job': v:null,
         \ 'generation': 0,
         \ 'entry': '',
+        \ 'desired_entry': '',
+        \ 'desired_auto': 0,
         \ 'bind': '',
         \ 'public_url': '',
         \ 'phase': 'stopped',
@@ -176,7 +181,6 @@ if !exists('g:_typst_preview_state')
         \ 'last_error': '',
         \ 'stderr_log': [],
         \ 'stopping': 0,
-        \ 'pending_start': '',
         \ }
 endif
 
@@ -184,6 +188,86 @@ endif
 " to the same shared dictionary, rebound on every source (cheap: no copy),
 " not a fresh local state container.
 let s:preview = g:_typst_preview_state
+
+" g:_typst_preview_state survives a plain `:source $MYVIMRC` (see above),
+" so a dict created by an older version of this file -- before
+" 'desired_entry'/'desired_auto' existed -- is not recreated by the guard
+" above and would otherwise be missing these keys entirely, throwing E716
+" the first time any function below reads them. Captured before either key
+" is added: this is also the signal for the inherited-job check below,
+" which needs to know whether this dict predates them, not whether it
+" still does after this block runs.
+let s:migrating_preview_state = !has_key(s:preview, 'desired_entry')
+
+if !has_key(s:preview, 'desired_entry')
+  let s:preview.desired_entry = ''
+endif
+if !has_key(s:preview, 'desired_auto')
+  let s:preview.desired_auto = 0
+endif
+
+" A dict shaped like this was created by a version of this script whose
+" s:OnPreviewExit predates desired_entry-based reconciliation. If a job is
+" currently running (or already mid-stop under that old code -- checking
+" `stopping` and only acting when it is still 0 is NOT enough: an old stop
+" already requested but not yet confirmed hits exactly the same gap once
+" it does confirm), its err_cb/exit_cb Funcrefs are still bound to that OLD
+" script instance -- Vim never rebinds an already-running job's callbacks
+" just because the script that started it was re-sourced -- and that old
+" code has no way to call the current s:ConvergePreview. Left to the old
+" exit_cb alone, it would eventually clear the job while only ever
+" checking its own `pending_start` (which nothing sets anymore), never
+" reconciling whatever the new code's desired_entry has since become, and
+" the preview would stay stuck until an unrelated event happened to
+" trigger reconciliation.
+"
+" There is no Vim API to redirect a running job's already-registered
+" callbacks, so this cannot make the *old* exit_cb call into new code.
+" Instead: bump the generation so that stale callback -- whenever it
+" eventually fires, stopping already requested or not -- fails its own
+" generation check and becomes a complete no-op, and adopt "no job" as far
+" as the new code is concerned right now rather than waiting for it. This
+" is a one-time, synchronous exception to "let job_stop()/exit_cb be the
+" only serialization boundary": there is no callback left to serialize on.
+" The OS process may briefly still be exiting when the next start is
+" requested, which can show as one harmless, self-correcting "address
+" already in use" failure (already a handled, non-corrupting state) rather
+" than silent success -- a narrow trade-off for a narrow, one-time,
+" hot-reload-during-an-in-flight-stop edge case, not an ongoing one: a
+" plain re-source of an already-migrated dict never reaches this branch.
+if s:migrating_preview_state && s:preview.job isnot v:null
+  call job_stop(s:preview.job, 'term')
+  let s:preview.generation += 1
+  let s:preview.job = v:null
+  let s:preview.stopping = 0
+  let s:preview.phase = 'stopped'
+  let s:preview.entry = ''
+endif
+unlet s:migrating_preview_state
+
+" Shared by the tinymist stderr parser below and the reconciler's own
+" switch/stop decisions, so every asynchronous trace -- not just tinymist's
+" own output -- carries both the desired target and the job's actual entry,
+" letting a stale-target trace be told apart from a stale-job one.
+function! s:LogPreviewEvent(msg) abort
+  " Best-effort only: this is an `abort` function called from other
+  " `abort` functions (s:ConvergePreview among them) *before* they issue
+  " the actual job_stop()/job_start() -- an unwritable log path or a full
+  " state filesystem must never propagate out of here and cut off the
+  " caller's own remaining lines, or a stop/start request could silently
+  " never be issued at all. See :TypstPreview status for the alternative
+  " signal when logging itself is failing.
+  try
+    call s:EnsureLogDir()
+    call writefile([strftime('%Y-%m-%d %H:%M:%S')
+          \ . ' gen=' . s:preview.generation
+          \ . ' phase=' . s:preview.phase
+          \ . ' desired=' . (empty(s:preview.desired_entry) ? '(none)' : s:preview.desired_entry)
+          \ . ' entry=' . (empty(s:preview.entry) ? '(none)' : s:preview.entry)
+          \ . ' ' . a:msg], g:typst_preview_log_file, 'a')
+  catch
+  endtry
+endfunction
 
 " Tinymist logs exclusively to stderr, not stdout (verified against the
 " tinymist v0.14.18 binary: stdout is empty for the whole process
@@ -222,12 +306,7 @@ function! s:OnPreviewErr(generation, channel, msg) abort
     call remove(s:preview.stderr_log, 0)
   endif
 
-  call s:EnsureLogDir()
-  call writefile([strftime('%Y-%m-%d %H:%M:%S')
-        \ . ' gen=' . a:generation
-        \ . ' phase=' . s:preview.phase
-        \ . ' entry=' . s:preview.entry
-        \ . ' ' . a:msg], g:typst_preview_log_file, 'a')
+  call s:LogPreviewEvent(a:msg)
 
   if a:msg =~# 'Static file server listening on'
     " Retain the address Tinymist itself reports, not just the bind we
@@ -258,10 +337,16 @@ function! s:OnPreviewExit(generation, job, status) abort
     return
   endif
 
-  if s:preview.stopping
+  " Captured before being cleared below: it is what tells an intentional
+  " shutdown (TypstPreviewStop/Restart, or the reconciler switching targets)
+  " apart from tinymist dying on its own, and only the former should ever
+  " reconverge below.
+  let l:was_stopping = s:preview.stopping
+
+  if l:was_stopping
     " Only a confirmed exit may ever advertise 'stopped' -- job_stop()
-    " itself only requests asynchronous termination, so TypstPreviewStop()
-    " sets 'stopping', not 'stopped', and waits for this callback.
+    " itself only requests asynchronous termination, so the request sets
+    " 'stopping', not 'stopped', and waits for this callback.
     let s:preview.phase = 'stopped'
     let s:preview.entry = ''
   elseif s:preview.phase !=# 'failed'
@@ -273,40 +358,44 @@ function! s:OnPreviewExit(generation, job, status) abort
   let s:preview.job = v:null
   let s:preview.stopping = 0
 
-  " job_stop() only requests termination; the OS reaps the process and this
-  " callback fires asynchronously, later. Any start requested while a stop
-  " was still in flight -- via :TypstPreview restart, or plain stop
-  " immediately followed by start -- gets queued in pending_start (by
-  " s:MaybeStartForBuffer itself, see below) instead of racing the old
-  " job's belated exit. The entrypoint is captured at request time, not
-  " re-resolved from "whatever buffer is current" once this callback
-  " finally runs.
-  if !empty(s:preview.pending_start)
-    let l:target = s:preview.pending_start
-    let s:preview.pending_start = ''
-    " Always the deferred continuation of an explicit request (:TypstPreview
-    " restart, or start racing a still-in-flight stop) -- see where
-    " pending_start is set in s:MaybeStartForBuffer, both branches guarded
-    " by `if a:auto | return | endif` above. Never queued for an automatic
-    " FileType trigger, so a validation failure here should be as visible
-    " as it would have been had the stop not still been in flight.
-    call s:StartForEntry(l:target, 0)
+  if l:was_stopping
+    " job_stop() only requests termination; the OS reaps the process and
+    " this callback fires asynchronously, later. This is the serialization
+    " boundary the reconciler relies on: reconverge now against whatever
+    " desired_entry navigation has moved to *during* this shutdown --
+    " possibly a different file than the one that triggered the stop, or
+    " empty if the user has since navigated away from every Typst buffer --
+    " rather than replaying a value captured back when the stop began.
+    "
+    " desired_auto (not a hardcoded 1) carries forward whether that latest
+    " desired_entry came from an explicit command or automatic navigation:
+    " an explicit :TypstPreview start/restart whose actual start is
+    " deferred to this exact continuation (it raced a still-in-flight stop)
+    " must still be able to echoerr a validation failure, exactly as if the
+    " stop had not still been in flight.
+    call s:ConvergePreview(s:preview.desired_auto)
   endif
+  " An exit that was NOT requested (tinymist crashed on its own) must not
+  " reconverge: desired_entry may still equal the crashed entry, and
+  " starting it again immediately would be an uncontrolled crash loop. The
+  " 'failed' phase set above stands until an explicit :TypstPreview start
+  " or a later qualifying BufEnter/FileType/BufWritePost observation
+  " retries it through the normal reconciliation path.
 endfunction
 
 function! s:IsTypstBufnr(bufnr) abort
   return getbufvar(a:bufnr, '&filetype') ==# 'typst' && !empty(bufname(a:bufnr))
 endfunction
 
-" a:auto mirrors s:MaybeStartForBuffer's own parameter (see there): 1 when
-" this call originated from the FileType autocmd or a pending_start
-" continuation of one, 0 for a direct :TypstPreview start/restart. A config
-" validation failure is real state either way (phase/last_error, visible
-" via :TypstPreview status regardless), but only an explicit invocation
-" should ever echoerr it -- doing so unconditionally would run this inside
-" a FileType autocmd's own dispatch, and an uncaught error from an `abort`
-" function there can cut off any *other* plugin's FileType autocmd still
-" queued for the same event on this buffer.
+" a:auto: 1 when the call originated from an automatic observation
+" (BufEnter/FileType/BufWritePost, or a reconciliation continuation of one
+" from s:OnPreviewExit), 0 for a direct :TypstPreview start/restart. A
+" config validation failure is real state either way (phase/last_error,
+" visible via :TypstPreview status regardless), but only an explicit
+" invocation should ever echoerr it -- doing so unconditionally would run
+" this inside a BufEnter/FileType autocmd's own dispatch, and an uncaught
+" error from an `abort` function there can cut off any *other* plugin's
+" autocmd still queued for the same event on this buffer.
 function! s:StartForEntry(entry, auto) abort
   let s:preview.generation += 1
   let l:generation = s:preview.generation
@@ -377,105 +466,221 @@ function! s:StartForEntry(entry, auto) abort
   endif
 endfunction
 
-" The single boundary both the automatic (FileType) and explicit
-" (:TypstPreview start) paths converge on. a:bufnr is captured by the
-" caller -- from <abuf> at the autocmd boundary, or bufnr('%') for an
-" explicit call -- rather than read again from ambient '%' state deeper in
-" here, so the entrypoint a start acts on is never ambiguous about which
-" buffer it came from.
+" Requests asynchronous termination of the owned job, if any, exactly once.
+" Both the reconciler and :TypstPreview restart route through this so
+" 'stopping' can never be set twice for the same job -- job_stop() itself
+" is harmless to call again, but doing so would also re-arm the "stopping"
+" phase message/log noise for no reason.
+function! s:RequestStop() abort
+  if s:preview.job isnot v:null && !s:preview.stopping
+    " Route through 'stopping' and let s:OnPreviewExit be the sole place
+    " that ever sets 'stopped', regardless of what job_status() currently
+    " reads -- job_status() reporting non-'run' does NOT mean exit_cb has
+    " already fired for it (that callback is asynchronous and can still be
+    " pending); jumping straight to 'stopped' here would leave that pending
+    " callback's generation and s:preview.stopping both untouched, so when
+    " it later ran, it would read stopping=0 and treat an intentional stop
+    " as an unexpected exit, overwriting the correct 'stopped' with 'failed'.
+    let s:preview.stopping = 1
+    let s:preview.phase = 'stopping'
+    call job_stop(s:preview.job, 'term')
+  endif
+endfunction
+
+" The single boundary every path -- automatic navigation, explicit
+" start/stop, and s:OnPreviewExit's post-shutdown reconciliation -- uses to
+" make the running job match current intent. desired_entry is the one
+" durable fact this reads; nothing here re-derives intent from ambient '%'
+" or from a queued command captured earlier.
 "
-" a:auto: 1 when called from the FileType autocmd rather than a direct
-" :TypstPreview start. The autocmd fires for every saved-or-not .typ
-" buffer a user merely opens -- a brand-new unsaved exercise, or a second
-" file opened just to read it while a different entry's preview is already
-" running. Neither is a user request to start (or switch) a preview, so
-" those two cases must stay quiet there; only an explicit invocation should
-" ever echoerr about them.
-function! s:MaybeStartForBuffer(bufnr, auto) abort
-  if !s:IsTypstBufnr(a:bufnr)
-    if !a:auto
+" Do not sleep, poll, or start a timer to guess when a stopped job's port
+" is free: s:OnPreviewExit is the sole serialization boundary, and this
+" function returns immediately whenever a shutdown is already in flight,
+" trusting that exit callback to call back in here once it lands.
+function! s:ConvergePreview(auto) abort
+  if s:preview.stopping
+    return
+  endif
+
+  if empty(s:preview.desired_entry)
+    if s:preview.job isnot v:null
+      call s:LogPreviewEvent('stopping (no desired target)')
+      call s:RequestStop()
+    elseif s:preview.phase !=# 'stopped'
+      let s:preview.phase = 'stopped'
+      let s:preview.entry = ''
+    endif
+    return
+  endif
+
+  if s:preview.job isnot v:null
+    if s:preview.entry ==# s:preview.desired_entry
+      " Already converged: same target, live job, stable PID. Covers every
+      " duplicate/re-entry route (explicit start, window/tab re-entry,
+      " repeated saves, a redundant FileType firing) without touching the
+      " job at all.
+      return
+    endif
+    call s:LogPreviewEvent('switching: stopping ' . s:preview.entry . ' -> ' . s:preview.desired_entry)
+    call s:RequestStop()
+    return
+  endif
+
+  if filereadable(s:preview.desired_entry)
+    call s:StartForEntry(s:preview.desired_entry, a:auto)
+  elseif s:preview.phase !=# 'stopped'
+    " A new, not-yet-saved Typst buffer is the desired target: remain
+    " stopped until its first write makes it readable, rather than trying
+    " and failing to start tinymist against a nonexistent path.
+    let s:preview.phase = 'stopped'
+  endif
+endfunction
+
+function! s:SetDesiredEntry(target, auto) abort
+  " Compared against the OLD value before it's overwritten below: an
+  " automatic re-observation of the *same* target (BufWritePost fires on
+  " every save, including a redundant resave of the file an explicit
+  " :TypstPreview restart is still waiting to stop before restarting; a
+  " duplicate FileType/BufEnter is another route) must not downgrade
+  " desired_auto if an explicit request already recorded 0 for it -- see
+  " s:OnPreviewExit, which reads this value once the actual (re)start is
+  " deferred there. An explicit call (auto=0) always wins outright,
+  " whether or not the target changed; only a *same-target*, *automatic*
+  " call is the one case that must leave an existing explicit marking
+  " alone rather than blindly overwriting it.
+  let l:same_target = a:target ==# s:preview.desired_entry
+  let s:preview.desired_entry = a:target
+  if !a:auto || !l:same_target
+    let s:preview.desired_auto = a:auto
+  endif
+  call s:ConvergePreview(a:auto)
+endfunction
+
+" The tri-state classifier (D-3): a named ordinary buffer with filetype
+" typst becomes the desired target; any other named ordinary buffer clears
+" it; an unnamed buffer or one with a non-empty 'buftype' (terminal,
+" quickfix, help, and the nofile buffers NERDTree/Fugitive/FZF use) is
+" neither -- it is a navigation/inspection surface, not a replacement file,
+" so the current target is left untouched. This is also what keeps
+" :TypstPreview logs' own terminal buffer from stopping the very preview
+" its stream belongs to.
+"
+" a:is_navigation: 1 for BufEnter/FileType (a real arrival at this buffer,
+" which is what ":stop ... until ... a later leave/re-enter navigation
+" event" means -- see TypstPreviewStop), 0 for BufWritePost (a mere save
+" of the buffer you never left). Without this distinction, saving again in
+" a buffer you explicitly stopped would resurrect the preview merely
+" because BufWritePost re-derives the same desired target BufEnter would
+" have -- the write itself is not navigation, so it must not undo an
+" explicit stop the way leaving and coming back does.
+function! s:ObserveBuffer(bufnr, auto, is_navigation) abort
+  if a:bufnr != bufnr('%')
+    " Guards the FileType observer in particular: filetype can be set on a
+    " buffer that is not the current one (a background read, another
+    " plugin loading a .typ file to inspect it), and that must never steal
+    " the lease from whatever buffer the user is actually looking at.
+    return
+  endif
+
+  if getbufvar(a:bufnr, '&buftype') !=# '' || empty(bufname(a:bufnr))
+    return
+  endif
+
+  if getbufvar(a:bufnr, '&filetype') !=# 'typst'
+    call s:SetDesiredEntry('', a:auto)
+    return
+  endif
+
+  if a:is_navigation
+    call setbufvar(a:bufnr, 'typst_preview_explicit_stop', 0)
+  elseif getbufvar(a:bufnr, 'typst_preview_explicit_stop', 0)
+    return
+  endif
+
+  call s:SetDesiredEntry(fnamemodify(bufname(a:bufnr), ':p'), a:auto)
+endfunction
+
+function! TypstPreviewStart(...) abort
+  let l:auto = get(a:, 1, 0)
+  let l:bufnr = bufnr('%')
+
+  if !s:IsTypstBufnr(l:bufnr)
+    if !l:auto
       echoerr 'Not a Typst buffer.'
     endif
     return
   endif
 
-  let l:entry = fnamemodify(bufname(a:bufnr), ':p')
+  let l:entry = fnamemodify(bufname(l:bufnr), ':p')
 
   if !filereadable(l:entry)
-    if a:auto
+    if l:auto
       return
     endif
     echoerr 'Save this buffer before starting the preview (Tinymist previews a saved file, not an unsaved buffer).'
     return
   endif
 
-  if s:preview.stopping
-    " Merely opening another saved .typ file while a stop is in flight is
-    " not a request to start or switch previews either -- same principle
-    " as the "already running" branch below, just for the shutdown window
-    " instead of the running window. Only an explicit start/restart should
-    " ever queue a pending_start here; the auto path must stay quiet and
-    " let the stop actually finish stopping.
-    if a:auto
-      return
-    endif
-    " A previous job is still exiting (job_stop() only requests
-    " termination, asynchronously). Queue this entry rather than racing
-    " the old job's belated exit_cb for s:preview state and the port;
-    " s:OnPreviewExit starts it once that job is confirmed gone.
-    let s:preview.pending_start = l:entry
-    return
+  if !l:auto && s:preview.job isnot v:null && s:preview.entry ==# l:entry
+        \ && s:preview.phase =~# '^\(starting\|listening\)$'
+    echom 'Typst preview already running for ' . l:entry . ' at ' . s:preview.public_url
   endif
 
-  if s:preview.phase =~# '^\(starting\|listening\)$'
-    if s:preview.entry ==# l:entry
-      echom 'Typst preview already running for ' . l:entry . ' at ' . s:preview.public_url
-      return
-    endif
-
-    if a:auto
-      return
-    endif
-
-    echoerr 'Typst preview is already running for ' . s:preview.entry
-          \ . '. Run :TypstPreview stop first to switch entrypoints.'
-    return
-  endif
-
-  call s:StartForEntry(l:entry, a:auto)
-endfunction
-
-function! TypstPreviewStart(...) abort
-  call s:MaybeStartForBuffer(bufnr('%'), get(a:, 1, 0))
+  " An explicit start always supersedes any earlier explicit stop recorded
+  " for this buffer -- otherwise a save right after this start would still
+  " see the stale marker and refuse to reconcile (see s:ObserveBuffer).
+  call setbufvar(l:bufnr, 'typst_preview_explicit_stop', 0)
+  call s:SetDesiredEntry(l:entry, l:auto)
 endfunction
 
 function! TypstPreviewStop() abort
-  let s:preview.pending_start = ''
-  if s:preview.job isnot v:null
-    " Route through 'stopping' and let s:OnPreviewExit be the sole place
-    " that ever sets 'stopped', regardless of what job_status() currently
-    " reads -- job_status() reporting non-'run' does NOT mean exit_cb has
-    " already fired for it (that callback is asynchronous and can still be
-    " pending); jumping straight to 'stopped' here previously left that
-    " pending callback's generation and s:preview.stopping both untouched,
-    " so when it later ran, it read stopping=0 and treated an intentional
-    " stop as an unexpected exit, overwriting the correct 'stopped' with
-    " 'failed'. job_stop() on an already-dead job is a harmless no-op.
-    let s:preview.stopping = 1
-    let s:preview.phase = 'stopping'
-    call job_stop(s:preview.job, 'term')
-  else
-    " No job object at all -- already fully stopped/failed previously, or
-    " job_start() itself failed synchronously -- so there is no pending
-    " callback left to wait on.
-    let s:preview.entry = ''
-    let s:preview.phase = 'stopped'
+  " Marks whichever buffer actually owns the entry being stopped -- not
+  " necessarily bufnr('%'): :stop is not restricted to being invoked from
+  " the previewed buffer itself. This is what makes "stays stopped until
+  " :start or a later leave/re-enter" (see s:ObserveBuffer) survive a
+  " plain :w in that buffer instead of being undone by the very next save.
+  let l:target = !empty(s:preview.desired_entry) ? s:preview.desired_entry : s:preview.entry
+  if !empty(l:target)
+    let l:target_bufnr = bufnr(l:target)
+    if l:target_bufnr >= 0
+      call setbufvar(l:target_bufnr, 'typst_preview_explicit_stop', 1)
+    endif
   endif
+  call s:SetDesiredEntry('', 0)
 endfunction
 
 function! TypstPreviewRestart() abort
-  call TypstPreviewStop()
-  call TypstPreviewStart()
+  let l:bufnr = bufnr('%')
+
+  if !s:IsTypstBufnr(l:bufnr)
+    echoerr 'Not a Typst buffer.'
+    return
+  endif
+
+  let l:entry = fnamemodify(bufname(l:bufnr), ':p')
+
+  if !filereadable(l:entry)
+    echoerr 'Save this buffer before restarting the preview (Tinymist previews a saved file, not an unsaved buffer).'
+    return
+  endif
+
+  " Set directly rather than through s:SetDesiredEntry: that would converge
+  " straight into s:ConvergePreview's "already owns desired" no-op when
+  " restarting the file already running, but restart means an explicit
+  " stop+start even for that case. desired_auto is still recorded (0, this
+  " is always explicit) so that if the actual start ends up deferred to
+  " s:OnPreviewExit's continuation -- restarting while the same or a
+  " different entry is still mid-shutdown -- a validation failure there
+  " still reports the way an explicit command promises.
+  let s:preview.desired_entry = l:entry
+  let s:preview.desired_auto = 0
+  call setbufvar(l:bufnr, 'typst_preview_explicit_stop', 0)
+
+  if s:preview.job isnot v:null
+    call s:RequestStop()
+  else
+    call s:ConvergePreview(0)
+  endif
 endfunction
 
 " A cached phase is not liveness evidence by itself: job_status() polls the
@@ -492,15 +697,19 @@ function! s:ReconciledPhase() abort
 endfunction
 
 function! TypstPreviewStatus() abort
-  if s:preview.phase ==# 'stopped'
+  if s:preview.phase ==# 'stopped' && empty(s:preview.desired_entry)
     echom 'Typst preview: stopped'
     return
   endif
 
+  " desired and entry legitimately differ while switching, stopping,
+  " waiting for a new buffer's first save, or after a failure -- both are
+  " shown rather than collapsed into one field.
   let l:job_status = s:preview.job is v:null ? 'no-job' : job_status(s:preview.job)
   echom 'Typst preview: ' . s:ReconciledPhase()
         \ . ' | job=' . l:job_status
-        \ . ' | entry=' . s:preview.entry
+        \ . ' | desired=' . (empty(s:preview.desired_entry) ? '(none)' : s:preview.desired_entry)
+        \ . ' | entry=' . (empty(s:preview.entry) ? '(none)' : s:preview.entry)
         \ . ' | bind=' . s:preview.bind
         \ . ' | url=' . s:preview.public_url
         \ . ' | observed=' . (empty(s:preview.observed_listener) ? '(none)' : s:preview.observed_listener)
@@ -537,14 +746,22 @@ endfunction
 function! s:TypstPreviewHelp() abort
   echo ':TypstPreview {start|stop|restart|status|open|logs|help}' . "\n"
         \ . '  start    start the preview for the current entrypoint (no-op if already running for it)' . "\n"
-        \ . '  stop     stop the owned preview job' . "\n"
+        \ . '  stop     stop the owned preview job; stays stopped in this buffer until :start' . "\n"
+        \ . '           or the next qualifying navigation' . "\n"
         \ . '  restart  stop then start (recovery)' . "\n"
-        \ . '  status   phase, job state, entrypoint, bind/public URL, last error' . "\n"
+        \ . '  status   phase, job state, desired vs. actual entrypoint, bind/public URL, last error' . "\n"
         \ . '  open     echo the public preview URL (never opens a local browser)' . "\n"
         \ . '  logs     open a terminal following tinymist''s persisted stderr live' . "\n"
         \ . '  help     this message (also -h / --help / bare :TypstPreview)' . "\n"
         \ . '' . "\n"
-        \ . 'Current: phase=' . s:ReconciledPhase() . ' entry=' . (empty(s:preview.entry) ? '(none)' : s:preview.entry) . "\n"
+        \ . 'Automatic: entering a saved ordinary Typst file makes it the preview target;' . "\n"
+        \ . '  entering another ordinary file stops the preview; entering a transient surface' . "\n"
+        \ . '  (this logs terminal, help, a file picker, Fugitive, quickfix, ...) preserves' . "\n"
+        \ . '  the current target; a new unsaved Typst buffer starts after its first save.' . "\n"
+        \ . '' . "\n"
+        \ . 'Current: phase=' . s:ReconciledPhase()
+        \ . ' desired=' . (empty(s:preview.desired_entry) ? '(none)' : s:preview.desired_entry)
+        \ . ' entry=' . (empty(s:preview.entry) ? '(none)' : s:preview.entry) . "\n"
         \ . '  bind=' . g:typst_preview_bind . ' url=' . g:typst_preview_url . "\n"
         \ . '  log=' . g:typst_preview_log_file . "\n"
         \ . "\n"
@@ -605,12 +822,26 @@ augroup typst_preview_lifecycle
   " editor preference.
   autocmd FileType typst setlocal backupcopy=yes
   " <abuf> is captured at the autocmd boundary and threaded through
-  " explicitly, rather than letting s:MaybeStartForBuffer re-derive "the"
-  " buffer from ambient '%' state -- FileType fires synchronously for the
-  " buffer whose filetype just changed, so this is not currently a source
-  " of divergence, but it is the one boundary both this hook and an
-  " explicit :TypstPreview start now go through identically.
-  autocmd FileType typst call s:MaybeStartForBuffer(str2nr(expand('<abuf>')), 1)
+  " explicitly, rather than letting s:ObserveBuffer re-derive "the" buffer
+  " from ambient '%' state. BufEnter is the primary ownership boundary --
+  " it observes the destination buffer directly, unlike a BufLeave-based
+  " design, which can only guess where navigation is headed. FileType is
+  " kept alongside it purely as an initial-load/detection-ordering
+  " fallback (s:ObserveBuffer's own bufnr('%') check keeps a background
+  " buffer's FileType event from stealing the lease); BufWritePost is what
+  " activates a brand-new Typst buffer once its first save makes it
+  " readable, and is a no-op for every save after that. BufEnter/FileType
+  " pass is_navigation=1 (a real arrival, which may resume a buffer an
+  " explicit :stop left stopped); BufWritePost passes 0 (a mere save must
+  " not undo that same explicit stop).
+  autocmd BufEnter * call s:ObserveBuffer(str2nr(expand('<abuf>')), 1, 1)
+  autocmd FileType typst call s:ObserveBuffer(str2nr(expand('<abuf>')), 1, 1)
+  autocmd BufWritePost *.typ call s:ObserveBuffer(str2nr(expand('<abuf>')), 1, 0)
+  " Deliberately no BufLeave handler here: a departure autocmd cannot see
+  " the destination buffer, only that the current one is being left, so it
+  " cannot tell a real replacement file apart from a transient surface
+  " (:TypstPreview logs, a picker, help) without also duplicating the
+  " classification BufEnter already does on arrival.
   autocmd VimLeavePre * call TypstPreviewStop()
 augroup END
 
