@@ -59,7 +59,10 @@ tmux source-file ~/.tmux.conf
 
 With `xclip` uninstalled and `$DISPLAY` unset, over **plain `ssh`** (no `-Y`):
 
-- [ ] **(a) Bare shell** — `printf 'hello' | wclip`, then paste in Windows.
+- [ ] **(a) Bare shell** — `printf 'hello' | wclip` should print nothing to
+      the terminal (see [#42](https://github.com/paulgsc/dotfiles/issues/42)
+      — copying isn't printing), then paste in Windows to confirm the copy
+      still happened.
 - [ ] **(a2) Output passthrough** — `printf 'hello' | wclip > /tmp/wclip-test`,
       confirm `/tmp/wclip-test` contains `hello`, then paste `hello` in Windows.
 - [ ] **(a3) Pipeline passthrough** — `printf 'hello' | wclip | tr a-z A-Z`,
