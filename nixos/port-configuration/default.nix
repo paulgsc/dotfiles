@@ -181,6 +181,7 @@ _: {
         externalAccess = false;
         interfaces = ["lo"];
         owner = "docker";
+        lastUsed = "2026-09-20";
       }
 
       {
@@ -191,6 +192,7 @@ _: {
         externalAccess = false;
         interfaces = ["lo"];
         owner = "docker";
+        lastUsed = "2026-09-20";
       }
 
       {
@@ -201,6 +203,7 @@ _: {
         externalAccess = false;
         interfaces = ["lo"];
         owner = "docker";
+        lastUsed = "2026-09-20";
       }
 
       # ═══════════════════════════════════════════════════════════
