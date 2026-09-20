@@ -163,6 +163,47 @@ _: {
       }
 
       # ═══════════════════════════════════════════════════════════
+      # Observability Stack — Log Aggregation (paulgsc/server#340)
+      # ═══════════════════════════════════════════════════════════
+      # Loki, promtail and the docker-socket-proxy in front of it publish
+      # NO host port at all (unlike the exporters below, which at least
+      # bind loopback) — they only exist on the `monitoring-network`
+      # docker bridge, reachable by name (loki:3100, promtail:9080,
+      # docker-socket-proxy:2375) from Grafana/Prometheus and each other.
+      # `interfaces = ["lo"]` here doesn't claim they're loopback-bound;
+      # it's the closest fit in this schema for "no host exposure, so no
+      # firewall rule needed" and keeps them in the audit trail.
+      {
+        port = 3100;
+        protocol = "tcp";
+        service = "loki";
+        description = "Loki log aggregation HTTP API (grpc 9096 unused — single-instance, in-memory ring). auth_enabled: false, so this must never reach the host network; Grafana/Prometheus consume it as loki:3100 over monitoring-network only.";
+        externalAccess = false;
+        interfaces = ["lo"];
+        owner = "docker";
+      }
+
+      {
+        port = 9080;
+        protocol = "tcp";
+        service = "promtail";
+        description = "Promtail metrics/health endpoint, scraped by Prometheus as promtail:9080 over monitoring-network only.";
+        externalAccess = false;
+        interfaces = ["lo"];
+        owner = "docker";
+      }
+
+      {
+        port = 2375;
+        protocol = "tcp";
+        service = "docker-socket-proxy";
+        description = "tecnativa/docker-socket-proxy, CONTAINERS-only, fronting the real docker.sock for promtail's container discovery/log-reading. Effectively root-equivalent to whatever can reach it — stays off the host entirely, monitoring-network only.";
+        externalAccess = false;
+        interfaces = ["lo"];
+        owner = "docker";
+      }
+
+      # ═══════════════════════════════════════════════════════════
       # Metrics Exporters (localhost only)
       # ═══════════════════════════════════════════════════════════
       {
