@@ -35,15 +35,24 @@
 
     hr "Prune candidates"
     dangling=$(${pkgs.docker}/bin/docker images -f dangling=true -q | ${pkgs.coreutils}/bin/wc -l)
+    total_images=$(${pkgs.docker}/bin/docker images -q | ${pkgs.coreutils}/bin/wc -l)
+    used_images=$(${pkgs.docker}/bin/docker ps -aq | ${pkgs.findutils}/bin/xargs -r ${pkgs.docker}/bin/docker inspect --format '{{.Image}}' 2>/dev/null | ${pkgs.coreutils}/bin/sort -u | ${pkgs.coreutils}/bin/wc -l)
+    unused_images=$((total_images - used_images))
     stopped=$(${pkgs.docker}/bin/docker ps -aq -f status=exited | ${pkgs.coreutils}/bin/wc -l)
     vols=$(${pkgs.docker}/bin/docker volume ls -qf dangling=true | ${pkgs.coreutils}/bin/wc -l)
-    echo "  dangling images: $dangling   stopped containers: $stopped   unused volumes: $vols"
+    echo "  dangling images: $dangling   unused images (tagged + dangling): $unused_images"
+    echo "  stopped containers: $stopped   unused volumes: $vols"
+    if [ "$dangling" -lt "$unused_images" ]; then
+      echo "  note: most unused images here are tagged, not dangling — plain"
+      echo "        'docker image prune' won't touch them, use 'docker-reap --images'"
+    fi
 
     hr "What to do next"
     echo "  Full TUI (logs/actions/live stats):  lazydocker"
     echo "  Pure resource top (like htop):       ctop"
     echo "  Why is this image so big?:           dive <image>"
     echo "  Reclaim space (previewed, confirmed): docker-reap"
+    echo "  Reclaim ALL unused images (not just dangling): docker-reap --images"
   '';
 
   # docker-reap — preview reclaimable docker disk usage, then prune on
@@ -58,16 +67,18 @@
   docker-reap = pkgs.writeShellScriptBin "docker-reap" ''
     set -uo pipefail
 
+    IMAGES=0
     VOLUMES=0
     CACHE=0
     YES=0
     for arg in "$@"; do
       case "$arg" in
+        --images) IMAGES=1 ;;
         --volumes) VOLUMES=1 ;;
         --cache) CACHE=1 ;;
-        --all) VOLUMES=1; CACHE=1 ;;
+        --all) IMAGES=1; VOLUMES=1; CACHE=1 ;;
         --yes|-y) YES=1 ;;
-        *) echo "usage: docker-reap [--volumes] [--cache] [--all] [--yes]"; exit 2 ;;
+        *) echo "usage: docker-reap [--images] [--volumes] [--cache] [--all] [--yes]"; exit 2 ;;
       esac
     done
 
@@ -82,6 +93,11 @@
     ${pkgs.docker}/bin/docker system df
     echo
     echo "This will remove: stopped containers, dangling images, unused networks."
+    if [ "$IMAGES" = "1" ]; then
+      echo "  ...and ALL unused images, not just dangling ones (--images passed)."
+      echo "      (this is the 'ACTIVE=0 but RECLAIMABLE is huge' fix — dangling-only"
+      echo "      pruning skips tagged images nothing is currently using)"
+    fi
     [ "$VOLUMES" = "1" ] && echo "  ...and unused volumes (--volumes passed)."
     if [ "$CACHE" = "1" ]; then
       echo "  ...and the ENTIRE build cache (--cache passed) — this is usually the"
@@ -102,8 +118,13 @@
     step "pruning stopped containers"
     ${pkgs.docker}/bin/docker container prune -f
 
-    step "pruning dangling images"
-    ${pkgs.docker}/bin/docker image prune -f
+    if [ "$IMAGES" = "1" ]; then
+      step "pruning all unused images (not just dangling)"
+      ${pkgs.docker}/bin/docker image prune -a -f
+    else
+      step "pruning dangling images"
+      ${pkgs.docker}/bin/docker image prune -f
+    fi
 
     step "pruning unused networks"
     ${pkgs.docker}/bin/docker network prune -f
