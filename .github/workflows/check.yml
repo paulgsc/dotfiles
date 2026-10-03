@@ -55,6 +55,12 @@ jobs:
       - name: build nixos toplevel
         run: nix build --no-link .#nixosConfigurations.nixos.config.system.build.toplevel
 
+      # Runs Caddy on the lesson MCP tunnel's site and checks that only its
+      # public paths reach file_host and no caller's address does
+      # (nixos/lesson-mcp). `nix flake check --no-build` above only evaluates it.
+      - name: lesson MCP gate
+        run: nix build --no-link -L .#checks.x86_64-linux.lesson-mcp-gate
+
       # Build home-manager activation package
       - name: build home-manager activation
         run: nix build --no-link '.#homeConfigurations."paulg@nixos".activationPackage'

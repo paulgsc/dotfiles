@@ -19,6 +19,7 @@
     ./ports
     ./port-configuration
     ./subdomains
+    ./lesson-mcp
   ];
 
   nixpkgs = {
@@ -165,6 +166,15 @@
           proxyPass = "http://file_host:3000";
         };
       };
+    };
+
+    # The public half of file_host's MCP endpoint, through a Cloudflare Tunnel.
+    # Off until the tunnel exists: docs/lesson-mcp-tunnel.md creates it and
+    # says what to put here and in paulgsc/server's .env.
+    lessonMcp = {
+      enable = false;
+      # hostname = "lessons.example.com";
+      # tunnelId = "00000000-0000-0000-0000-000000000000";
     };
   };
 

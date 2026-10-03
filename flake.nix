@@ -67,6 +67,13 @@
       };
     };
 
+    # Checks that need a build, not just an eval: `nix flake check --no-build`
+    # only evaluates them, so CI builds each one by name.
+    checks.x86_64-linux.lesson-mcp-gate = import ./nixos/lesson-mcp/check.nix {
+      pkgs = nixpkgs.legacyPackages.x86_64-linux;
+      nixosConfiguration = self.nixosConfigurations.nixos;
+    };
+
     # Standalone home-manager configuration entrypoint
     # Available through 'home-manager --flake .#your-username@your-hostname'
     homeConfigurations = {

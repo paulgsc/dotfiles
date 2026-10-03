@@ -28,6 +28,26 @@ with lib; let
       else cfg.baseDomain;
   in "${name}.${suffix}";
 
+  # HELPER: siteAddress
+  # What Caddy matches the site on: the fqdn above, unless the host names its
+  # whole address itself (a scheme and port, for a listener nothing on the LAN
+  # browses to, such as a tunnel's origin).
+  siteAddress = name: hostCfg:
+    if hostCfg.address != null
+    then hostCfg.address
+    else fqdn name hostCfg;
+
+  # HELPER: proxyDirective
+  # The `reverse_proxy` line, with a block only when there are request headers
+  # to drop on the way upstream.
+  proxyDirective = hostCfg:
+    if hostCfg.stripRequestHeaders == []
+    then "reverse_proxy ${hostCfg.proxyPass}"
+    else ''
+      reverse_proxy ${hostCfg.proxyPass} {
+      ${concatMapStrings (h: "header_up -${h}\n") hostCfg.stripRequestHeaders}}
+    '';
+
   # HELPER: hostActive
   # A logic gate: A subdomain is only "active" if:
   # 1. The subdomain itself is enabled.
@@ -39,17 +59,36 @@ with lib; let
   # This function transforms our high-level 'hosts' options into the
   # specific structure 'services.caddy.virtualHosts' expects.
   renderCaddy = name: hostCfg: let
-    fullDomain = fqdn name hostCfg;
+    fullDomain = siteAddress name hostCfg;
   in
     # mkIf ensures that if the host isn't active, no config is generated at all.
     mkIf (hostActive name hostCfg) {
       # The attribute name here (e.g., "api.example.com") becomes the Caddy site address.
       ${fullDomain} = {
+        listenAddresses = hostCfg.bind;
+
+        # null renders no `log` directive, and Caddy then keeps no access log.
+        logFormat = mkIf (!hostCfg.accessLog) null;
+
+        # With allowPaths, only those paths reach proxyPass and every other one
+        # is a 404. The CEL comparison is on the path as sent: Caddy's `path`
+        # matcher cleans it first ("/a/../b" matches "/b") but proxies it
+        # uncleaned, so a crafted path could reach a route behind the gate.
+        #
         # Caddy's 'extraConfig' is a multi-line string that acts as the Caddyfile body.
         extraConfig = ''
           # If proxyPass is set, generate a 'reverse_proxy' directive.
           # Unlike Nginx, Caddy handles Websockets automatically here.
-          ${optionalString (hostCfg.proxyPass != null) "reverse_proxy ${hostCfg.proxyPass}"}
+          ${optionalString (hostCfg.proxyPass != null && hostCfg.allowPaths == []) (proxyDirective hostCfg)}
+          ${optionalString (hostCfg.allowPaths != []) ''
+            @allowed expression `{path} in [${concatMapStringsSep ", " (p: "'${p}'") hostCfg.allowPaths}]`
+            handle @allowed {
+              ${proxyDirective hostCfg}
+            }
+            handle {
+              respond 404
+            }
+          ''}
 
           # If a root path is set, tell Caddy where files live and enable the file server.
           ${optionalString (hostCfg.root != null) ''
@@ -127,6 +166,54 @@ in {
             default = "";
             description = "Raw Caddyfile lines to add to this virtual host.";
           };
+
+          address = mkOption {
+            type = types.nullOr types.str;
+            default = null;
+            example = "http://lessons.example.com:8787";
+            description = ''
+              The whole Caddy site address, replacing "<name>.<domain>". Use it
+              for a listener with its own scheme or port, e.g. a tunnel origin.
+            '';
+          };
+
+          bind = mkOption {
+            type = types.listOf types.str;
+            default = [];
+            example = ["127.0.0.1"];
+            description = "Interfaces this site listens on. Empty means all of them.";
+          };
+
+          allowPaths = mkOption {
+            # No quote or space: each one is spliced into a CEL string literal.
+            type = types.listOf (types.strMatching "/[^' ]*");
+            default = [];
+            example = ["/api/v1/mcp" "/.well-known/oauth-authorization-server"];
+            description = ''
+              Exact request paths. When set, only these reach proxyPass and
+              every other path answers 404. They are compared as sent: case
+              matters, there are no wildcards and no dot-segment cleaning, so
+              "/x/../api/v1/mcp" is not "/api/v1/mcp". Empty means every path
+              is proxied.
+            '';
+          };
+
+          accessLog = mkOption {
+            type = types.bool;
+            default = true;
+            description = ''
+              Keep Caddy's per-host access log (/var/log/caddy). It records each
+              request's headers, so turn it off for a host whose callers'
+              addresses arrive in a header.
+            '';
+          };
+
+          stripRequestHeaders = mkOption {
+            type = types.listOf types.str;
+            default = [];
+            example = ["Cf-Connecting-Ip"];
+            description = "Request headers removed before proxyPass sees the request.";
+          };
         };
       }));
       default = {};
@@ -135,6 +222,14 @@ in {
 
   # The actual work happens here: translating our options into NixOS system settings.
   config = mkIf cfg.enable (mkMerge [
+    {
+      assertions =
+        mapAttrsToList (name: hostCfg: {
+          assertion = hostCfg.allowPaths == [] || (hostCfg.proxyPass != null && hostCfg.root == null);
+          message = "services.subdomains.hosts.${name}: allowPaths gates proxyPass, so it needs proxyPass set and root unset.";
+        })
+        cfg.hosts;
+    }
     # If the user chose 'caddy' as the backend:
     (mkIf (cfg.backend == "caddy") {
       # 1. Enable the official NixOS Caddy service.
