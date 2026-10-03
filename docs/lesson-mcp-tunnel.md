@@ -114,7 +114,13 @@ stands for your hostname.
 
 5. **Let non-browser clients through.** If Bot Fight Mode is on for the zone,
    it challenges server-to-server calls, and every AI service then fails at
-   registration. Turn it off, or skip it for this hostname with a WAF rule.
+   registration. Turn it off (Security → Settings → Bot traffic). It cannot
+   be scoped to one hostname: Bot Fight Mode is outside the Ruleset Engine, so
+   a WAF Skip rule has no effect on it
+   (developers.cloudflare.com/bots/get-started/bot-fight-mode, "Limitations").
+   On a Pro plan or above, Super Bot Fight Mode does honour a Skip rule for the
+   hostname, and its "Definitely automated" must stay at Allow, or the tunnel
+   itself can fail with `websocket: bad handshake`.
 
 ## Checking it
 
