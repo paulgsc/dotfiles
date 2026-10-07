@@ -181,14 +181,13 @@
 
     " --- OSC52 clipboard yank (WAYLANDIA-CLIP #15/#19) ---
     " "+y / "*y ride the OSC52 escape sequence over the controlling
-    " terminal instead of xclip + $DISPLAY. Wrapped for tmux passthrough
-    " (see home-manager/shell/tmux's `allow-passthrough on`).
+    " terminal instead of xclip + $DISPLAY.  Plain OSC52 even inside tmux:
+    " `set-clipboard on` relays it through tmux's Ms capability.  A DCS
+    " `\ePtmux;` wrapper would need `allow-passthrough on`, which is off
+    " (security review #7), and would then be dropped silently.
     function! s:OSC52Yank(text) abort
       let b64 = system('base64 | tr -d "\n"', a:text)
       let seq = "\x1b]52;c;" . b64 . "\x07"
-      if !empty($TMUX)
-        let seq = "\x1bPtmux;\x1b" . seq . "\x1b\\"
-      endif
       call writefile([seq], '/dev/tty', 'b')
     endfunction
 

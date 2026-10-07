@@ -81,8 +81,20 @@ _: let
         # Clipboard — OSC52 over the ssh TTY, no $DISPLAY/xclip
         # (WAYLANDIA-CLIP #15/#18)
         # ────────────────────────────────
+        #
+        # `set-clipboard on` is the whole relay: tmux takes a plain OSC52 from
+        # any pane (wclip, vim's yank) or from its own copy-mode, keeps it as a
+        # buffer, and re-emits it to the outer terminal through Ms below.
+        #
+        # `allow-passthrough off` is tmux's default, written out to record the
+        # decision (security review #7).  `on` let any program printing into a
+        # pane — `cat` of a hostile log, a poisoned build script — wrap raw
+        # escape sequences in DCS `\ePtmux;…` and hand them to Windows Terminal
+        # unfiltered.  Nothing needs it since wclip and vim emit plain OSC52;
+        # a DCS-wrapped OSC52 is now dropped silently, which is the failure to
+        # suspect if a copy stops arriving.  See docs/clipboard-osc52.md.
         set -g set-clipboard on
-        set -g allow-passthrough on
+        set -g allow-passthrough off
         # Ms takes TWO parameters: %p1 is the selection ("c", "s0", …) and %p2
         # is the base64 payload.  This used to read `Ms=\E]52;c;%p1%s\007`,
         # which pinned the selection but then interpolated the *selection* as
