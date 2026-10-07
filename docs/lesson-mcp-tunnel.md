@@ -7,10 +7,16 @@ them. It exposes nothing else. The design is in paulgsc/server's
 box's side of it.
 
 ```
-AI service ──https──▶ Cloudflare edge ──tunnel (cloudflared dials out)──▶
-  Caddy on 127.0.0.1:8787 ── 5 exact paths ──▶ file_host on 127.0.0.1:3000
-                          └─ anything else ──▶ 404
+AI service ──TLS──▶ Tailscale Funnel relay ──same encrypted bytes──▶ tailscaled on this box
+                    (cannot decrypt)                                  (holds the certificate)
+                                                                            │ decrypted here
+                          Caddy on 127.0.0.1:8787 ── 5 exact paths ──▶ file_host on 127.0.0.1:3000
+                                                  └─ anything else ──▶ 404
 ```
+
+The box dials out to Tailscale; nothing is opened on the router or the
+firewall, and the public name points at Tailscale's relays, not your home
+address.
 
 ## What crosses, and what does not
 
@@ -30,81 +36,110 @@ from home.
 The paths are compared exactly as sent: case matters, and no wildcards or
 dot-segment cleaning apply. Caddy's own `path` matcher cleans a path before it
 compares (`/api/v1/shelf/../mcp` matches `/api/v1/mcp`) but proxies the path
-uncleaned. That would let a crafted path reach a route behind the gate.
+uncleaned, which would let a crafted path reach a route behind the gate.
 
 ### Invariants
 
-- **LM1:** only those five paths reach file_host through the tunnel.
-  Everything else is a 404 from Caddy.
-- **LM2:** the tunnel's origin (Caddy, port 8787) listens on loopback only.
-- **LM3:** no caller's address reaches file_host or a log on this box.
-  Caddy drops `Cf-Connecting-Ip`, `X-Forwarded-For` and the other address
-  headers, and the site keeps no access log (NixOS's Caddy module writes one
-  per host by default, with request headers).
-- **LM4:** the tunnel's credentials never enter the Nix store.
+- **LM1:** only those five paths reach file_host through Funnel. Everything
+  else is a 404 from Caddy.
+- **LM2:** Funnel's origin (Caddy, port 8787) listens on loopback only.
+- **LM3:** no caller's address reaches file_host, a log on this box, or
+  Tailscale's log servers.
+  - `tailscaled` sets `X-Forwarded-For` to the caller, and Caddy drops it
+    along with the other address headers.
+  - The Caddy site keeps no access log. NixOS's Caddy writes one per host by
+    default, with request headers.
+  - `tailscaled` uploads no logs (`TS_NO_LOGS_NO_SUPPORT`).
+  - Its few log lines that print a Funnel caller's address (error paths in
+    `ipn/ipnlocal/serve.go`) are dropped before the journal stores them
+    (`LogFilterPatterns`).
+- **LM4:** retired with the Cloudflare Tunnel. There is no tunnel credential
+  to place; `tailscaled` keeps its node key in its own state.
+- **LM5:** Funnel is on only while the module is. `tailscaled` persists the
+  setting, so the `lesson-mcp-funnel` unit turns it off when it stops, and a
+  rebuild that removes the unit stops it.
 
-`checks.x86_64-linux.lesson-mcp-gate` (CI, "lesson MCP gate") runs Caddy on
-the rendered site and probes 27 paths and the address headers. It covers LM1
-and LM3, and asserts LM2 and LM3's log half at eval. LM4 is an assertion in
-the module.
+- **LM6:** joining the tailnet opens no port to tailnet devices. By default
+  `tailscaled` adds `-i tailscale0 -j ACCEPT` ahead of the NixOS firewall,
+  which would let every device in the tailnet reach every port on the box:
+  Redis, `file_host`'s operator routes, NATS. The module runs it with
+  `--netfilter-mode=off`, so the NixOS firewall alone governs `tailscale0`.
+  It admits LAN ports only from `10.0.0.0/24`, and tailnet addresses are
+  `100.64.0.0/10`. Funnel is unaffected: `tailscaled` handles its connections
+  in its own userspace network stack, before the kernel firewall sees them.
+
+`checks.x86_64-linux.lesson-mcp-gate` (CI, "lesson MCP gate") does three
+things:
+- It runs Caddy on the rendered site and probes 27 paths and the address
+  headers, covering LM1 and LM3's header half.
+- It asserts LM2, LM3's upload half, LM5 and LM6 on the rendered units.
+- It reads the pinned tailscale's `serve.go` and fails if any log line there
+  that names a peer address is not covered by the journal filter. A
+  tailscale bump that adds or rewords one turns CI red until the list in
+  `nixos/lesson-mcp/default.nix` is updated.
 
 Because the address headers are dropped, file_host's rate limiter sees every
-public caller as one client. That is the same trade some-ui's nginx makes. If
-a stranger's traffic ever crowds out your services, add a Cloudflare rate
-limiting rule for the hostname. Don't forward addresses to fix it.
+public caller as one client, the same trade some-ui's nginx makes. Funnel has
+no rate-limit or firewall settings of its own. If a stranger's traffic ever
+crowds out your services, turn Funnel off (below). Don't forward addresses to
+fix it.
 
-## What Cloudflare sees
+## What Tailscale sees
 
-Cloudflare terminates TLS at its edge. Everything that crosses is readable
-there: bearer tokens, your progress, and the lessons an AI service keeps. That
-is the cost of this tunnel. Tailscale Funnel would terminate TLS on this box
-instead, if that cost ever stops being acceptable. The AI service sees the
-same content anyway, because that is the point of connecting it.
+Content: nothing. `tailscaled` on this box holds the TLS certificate and
+decrypts; Funnel's relays forward encrypted bytes. Tailscale does see
+metadata:
+- each caller's address;
+- the hostname;
+- when requests happen and how large they are;
+- your tailnet's device list and keys, as its coordination server.
+
+Two further points:
+- **Tailscale could in principle issue a certificate for the `ts.net` name
+  and intercept.** That would be an active attack, visible in public
+  Certificate Transparency logs. Tailnet Lock guards the separate risk of
+  Tailscale adding a device to your tailnet.
+- **The `ts.net` name is public.** It shows up in those same logs, so
+  scanners will find it. The gate is what answers them.
 
 ## One-time setup
 
-You need a domain whose DNS is on Cloudflare. Below, `lessons.example.com`
-stands for your hostname.
+1. **Create a tailnet** at <https://login.tailscale.com>. You sign in with a
+   Google, GitHub, Apple or Microsoft account; the Personal plan is free. Pick
+   the tailnet's name now (DNS page → "Rename tailnet"). AI services remember
+   the address, so renaming later means connecting each of them again.
 
-1. **Create the tunnel**, on the box:
+2. **In the admin console:**
+   - DNS: enable **MagicDNS** and **HTTPS Certificates**.
+   - Access controls: allow Funnel by adding to the policy file:
 
-   ```sh
-   nix shell nixpkgs#cloudflared
-   cloudflared tunnel login                 # browser; writes ~/.cloudflared/cert.pem
-   cloudflared tunnel create lesson-mcp     # prints the tunnel id
-   cloudflared tunnel route dns lesson-mcp lessons.example.com
-   ```
+     ```json
+     "nodeAttrs": [
+       { "target": ["autogroup:member"], "attr": ["funnel"] }
+     ]
+     ```
 
-2. **Move the credentials out of your home directory** (LM4):
+3. **Turn the module on** in `nixos/configuration.nix`
+   (`lessonMcp.enable = true;`), then `sudo nixos-rebuild switch --flake .#nixos`.
 
-   ```sh
-   sudo install -D -m 0600 -o root -g root \
-     ~/.cloudflared/<tunnel-id>.json /var/lib/cloudflared/lesson-mcp.json
-   rm ~/.cloudflared/<tunnel-id>.json
-   ```
+4. **Log the box in:** `sudo tailscale up`, then open the URL it prints.
+   Then, in the admin console's Machines page, open `nixos` →
+   **Disable key expiry**. Otherwise the node key expires after 180 days and
+   Funnel goes down with it.
 
-   `cert.pem` is your Cloudflare account's certificate. Only `tunnel create`,
-   `route` and `delete` use it; the running tunnel does not. Delete it, and
-   run `tunnel login` again the next time you need one of those commands.
+5. **Start Funnel:** `lesson-mcp-funnel` retries every two minutes until
+   step 4 is done. To skip the wait, run
+   `sudo systemctl restart lesson-mcp-funnel`. Confirm with
+   `tailscale funnel status`.
 
-3. **Turn the module on** in `nixos/configuration.nix`, then
-   `sudo nixos-rebuild switch --flake .#nixos`:
-
-   ```nix
-   lessonMcp = {
-     enable = true;
-     hostname = "lessons.example.com";
-     tunnelId = "<tunnel-id>";
-   };
-   ```
-
-4. **Point file_host at it**, in paulgsc/server's `.env` (its `example.env`
-   documents each variable), then recreate the container
-   (`docker compose up -d file-host`):
+6. **Point file_host at it.** Find the public name with
+   `tailscale status --json | jq -r .Self.DNSName`, and drop the trailing
+   dot. Put it in paulgsc/server's `.env` (its `example.env` documents each
+   variable), then recreate the container (`docker compose up -d file-host`):
 
    ```sh
-   OAUTH_ISSUER="https://lessons.example.com"
-   OAUTH_RESOURCE="https://lessons.example.com/api/v1/mcp"
+   OAUTH_ISSUER="https://nixos.<tailnet>.ts.net"
+   OAUTH_RESOURCE="https://nixos.<tailnet>.ts.net/api/v1/mcp"
    OAUTH_AUTHORIZE_URL="https://nixos.local:5173/connect"
    # The prompt get_lesson_prompt hands out: the host path is mounted into the
    # container, and file_host reads it at the container path.
@@ -112,29 +147,29 @@ stands for your hostname.
    MCP_LESSON_PROMPT_FILE="/app/lesson-prompt.md"
    ```
 
-5. **Let non-browser clients through.** If Bot Fight Mode is on for the zone,
-   it challenges server-to-server calls, and every AI service then fails at
-   registration. Turn it off (Security → Settings → Bot traffic). It cannot
-   be scoped to one hostname: Bot Fight Mode is outside the Ruleset Engine, so
-   a WAF Skip rule has no effect on it
-   (developers.cloudflare.com/bots/get-started/bot-fight-mode, "Limitations").
-   On a Pro plan or above, Super Bot Fight Mode does honour a Skip rule for the
-   hostname, and its "Definitely automated" must stay at Allow, or the tunnel
-   itself can fail with `websocket: bad handshake`.
-
 ## Checking it
 
 ```sh
-systemctl status 'cloudflared-tunnel-*'
-curl -s https://lessons.example.com/.well-known/oauth-authorization-server | jq .issuer
-curl -si -X POST https://lessons.example.com/api/v1/mcp | grep -i www-authenticate   # 401, names the metadata
-curl -so /dev/null -w '%{http_code}\n' https://lessons.example.com/api/v1/oauth/grants   # 404
+systemctl status tailscaled lesson-mcp-funnel
+tailscale funnel status
+curl -s https://nixos.<tailnet>.ts.net/.well-known/oauth-authorization-server | jq .issuer
+curl -si -X POST https://nixos.<tailnet>.ts.net/api/v1/mcp | grep -i www-authenticate   # 401, names the metadata
+curl -so /dev/null -w '%{http_code}\n' https://nixos.<tailnet>.ts.net/api/v1/oauth/grants   # 404
 ```
+
+## Turning it off
+
+- **Now:** `sudo systemctl stop lesson-mcp-funnel`, which runs
+  `tailscale funnel --https=443 off`. Nothing else on the box changes.
+- **For good:** set `lessonMcp.enable = false;` and rebuild. That stops the
+  unit, which turns Funnel off, and stops `tailscaled` unless something else
+  enables it.
 
 ## Not here
 
 - **Frame-busting for `/connect`.** The page is served by some-ui's `vite dev`
   on port 5173, not by this Caddy, so its `frame-ancestors` header is set in
   `apps/www/vite.config.ts`.
-- **Changing the hostname later.** Every connected service has stored the old
-  issuer, so each one has to be connected again.
+- **Reaching the box from your other devices over the tailnet.** LM6 keeps
+  that closed. Opening a port to them is a firewall rule on `tailscale0`
+  added on purpose, not a side effect of joining.

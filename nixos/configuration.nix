@@ -168,14 +168,10 @@
       };
     };
 
-    # The public half of file_host's MCP endpoint, through a Cloudflare Tunnel.
-    # Off until the tunnel exists: docs/lesson-mcp-tunnel.md creates it and
-    # says what to put here and in paulgsc/server's .env.
-    lessonMcp = {
-      enable = false;
-      # hostname = "lessons.example.com";
-      # tunnelId = "00000000-0000-0000-0000-000000000000";
-    };
+    # The public half of file_host's MCP endpoint, through Tailscale Funnel.
+    # Off until the tailnet allows Funnel: docs/lesson-mcp-tunnel.md sets that
+    # up and says what to put in paulgsc/server's .env.
+    lessonMcp.enable = false;
   };
 
   # Enable touchpad support (enabled default in most desktopManager).

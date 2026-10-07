@@ -55,8 +55,9 @@ jobs:
       - name: build nixos toplevel
         run: nix build --no-link .#nixosConfigurations.nixos.config.system.build.toplevel
 
-      # Runs Caddy on the lesson MCP tunnel's site and checks that only its
-      # public paths reach file_host and no caller's address does
+      # Runs Caddy on the lesson MCP Funnel's site and checks that only its
+      # public paths reach file_host and no caller's address does, and that
+      # tailscaled's journal filter covers every log line naming a caller
       # (nixos/lesson-mcp). `nix flake check --no-build` above only evaluates it.
       - name: lesson MCP gate
         run: nix build --no-link -L .#checks.x86_64-linux.lesson-mcp-gate
