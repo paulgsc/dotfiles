@@ -14,7 +14,7 @@ Feeds the security review, [#7](https://github.com/paulgsc/dotfiles/issues/7).
 | Story | What it settled | Where |
 | --- | --- | --- |
 | [#23](https://github.com/paulgsc/dotfiles/issues/23) S1 | Inventory of every GUI / `$DISPLAY` consumer | [table below](#s1--what-was-actually-using-the-display) |
-| [#24](https://github.com/paulgsc/dotfiles/issues/24) S2 | Remote-GUI transport: `waypipe`, on demand | `nixos/remote-gui` |
+| [#24](https://github.com/paulgsc/dotfiles/issues/24) S2 | Remote-GUI transport: none (`waypipe` removed in [#7](https://github.com/paulgsc/dotfiles/issues/7)) | `nixos/remote-gui` |
 | [#25](https://github.com/paulgsc/dotfiles/issues/25) S3 | Headed browser tests: throwaway Wayland compositor | `home-manager/shell/headed-test` |
 | [#26](https://github.com/paulgsc/dotfiles/issues/26) S4 | Dev servers are web-forwarded, not X-forwarded | [test matrix](#test-matrix) |
 | [#27](https://github.com/paulgsc/dotfiles/issues/27) S5 | `X11Forwarding`/`xauth`/`xhost` deleted | `nixos/remote-gui` |
@@ -48,52 +48,50 @@ not specifically a *forwarded* one. That is what made S5 possible.
 > desktop on seat 0 and has nothing to do with ssh forwarding; retiring it is
 > a separate question this epic deliberately does not touch. It is also why a
 > true GUI app has somewhere to run without any transport at all: walk up to
-> the machine, or use the escape hatch below.
+> the machine.
 
-## S2 — the remote-GUI transport: `waypipe`, when you actually need it
+## S2 — the remote-GUI transport: none, on purpose
 
 The honest answer for daily work is **no transport is needed**. Nothing in the
-inventory above draws a remote window as part of a normal day.
+inventory above draws a remote window as part of a normal day. For the rare
+genuine case, walk up to the box: it runs its own GNOME session on seat 0.
 
-For the rare genuine case, the sanctioned tool is **`waypipe`** — the Wayland
-equivalent of `ssh -X`, forwarding the Wayland protocol over an ordinary ssh
-stdio channel:
+### What used to be here, and why it went
 
-```bash
-# from WSL (WSLg provides the Windows-side compositor)
-waypipe ssh nixos.local <gui-app>
-```
+#24 originally installed **`waypipe`** as an escape hatch — the Wayland
+equivalent of `ssh -X`, run from WSL as `waypipe ssh nixos.local <gui-app>`.
+It was strictly better than `ssh -Y` (no listening socket, no cookie file, one
+application rather than the whole session), and it was still removed in the
+security review ([#7](https://github.com/paulgsc/dotfiles/issues/7)):
 
-`waypipe` is *installed* on the remote (`nixos/remote-gui`) rather than merely
-written down here, so that half works the day it is needed instead of
-requiring a rebuild first. It is strictly better than what it replaces: no
-listening socket, no `MIT-MAGIC-COOKIE` file on disk, and it forwards one
-application rather than granting a channel to the whole session.
+- **A waypipe app is a Wayland client of WSLg**, and WSLg shares the Windows
+  clipboard. A program on the box drawing through waypipe could read whatever
+  Windows last copied — passwords, banking details. The review's threat model
+  assumes code on the box may one day be hostile (a poisoned npm or cargo
+  package, a hijacked agent), and the Windows PC is the machine that must not
+  be reachable from it.
+- **Its transport is ssh unix-socket forwarding** (`ssh -R` with socket
+  paths). `nixos/remote-gui` now sets `AllowStreamLocalForwarding = "no"`, so
+  the channel is refused server-side and a client-side `waypipe ssh` fails
+  instead of quietly re-opening the path. `nixos/configuration.nix` refuses the
+  neighbouring channels for the same reason: `AllowAgentForwarding = false`
+  and `AllowTcpForwarding = "local"` (no `ssh -R`).
+- **It was a deliberate trade.** waypipe was in use; giving it up costs the
+  occasional remote window, and the owner chose that over a channel from the
+  box into the Windows clipboard.
 
-**`waypipe` has to exist on both ends**, and this repo does not manage the WSL
-distro's packages — `wsl/` carries only `.wslconfig`, which is Windows-side
-WSL2 configuration. So the client half is a manual one-time step:
+The package is gone from everywhere this repo installed it (`nixos/remote-gui` and
+`home-manager/shell/headed-test`). If WSL had `waypipe` installed by hand with
+`apt`, it can be removed there too (`sudo apt remove waypipe`); it no longer
+has anything to connect to.
 
-```bash
-# in WSL
-sudo apt install waypipe
-echo "$WAYLAND_DISPLAY"      # must be non-empty, or WSLg is not running
-```
+### Why not `ssh -Y` either
 
-Check the two versions agree before debugging anything else — `waypipe
---version` on each side. waypipe was rewritten between the 0.8.x C
-implementation and the 0.10.x Rust one, and a distro package several releases
-behind what nixpkgs pins is a plausible source of a connection that opens and
-then does nothing. If they diverge, pin the remote's `waypipe` in
-`nixos/remote-gui` to match the client rather than chasing it from the WSL
-side.
-
-Why not keep `ssh -Y` for this? Because `-Y` is *trusted* forwarding — it
-disables the X security extension, so any program on the remote can read your
-keystrokes and screen-scrape other windows on the WSL side. Keeping a
-permanently-enabled channel with that blast radius, to serve a case that
-occurs approximately never, is precisely the trade the security review objects
-to.
+`-Y` is *trusted* forwarding — it disables the X security extension, so any
+program on the remote can read your keystrokes and screen-scrape other windows
+on the WSL side. Keeping a permanently-enabled channel with that blast radius,
+to serve a case that occurs approximately never, is precisely the trade the
+security review objects to. `X11Forwarding` stays `false`.
 
 ## S3 — headed browser tests without a forwarded display
 
@@ -179,6 +177,9 @@ From `nixos/ssh-x11/default.nix`, now `nixos/remote-gui/default.nix`:
   longer exists
 - `xorg.xauth` — minted the per-session magic cookie for forwarding
 - `xorg.xhost` — host-based X access control
+- `waypipe` (later, in the security review [#7](https://github.com/paulgsc/dotfiles/issues/7)) —
+  see [S2](#s2--the-remote-gui-transport-none-on-purpose); its unix-socket
+  transport is now refused by `AllowStreamLocalForwarding = "no"`
 
 The module was renamed because a directory called `ssh-x11` whose entire
 content is "no X11" is a trap for the next reader.
@@ -229,9 +230,10 @@ after reconnecting. Full step-by-step walkthrough:
 - [ ] **(f3) Headed tests** — `headed-run pnpm exec playwright test --headed`
       in `~/dev/some-ui` runs against a real compositor rather than silently
       falling back to headless.
-- [ ] **(g) Escape hatch** — from WSL, `waypipe ssh nixos.local <gui-app>`
-      draws a window on Windows.
+- [ ] **(g) No remote-GUI channel** — on the box, `command -v waypipe` finds
+      nothing. (This row used to test the waypipe escape hatch; it was retired
+      with the hatch in [#7](https://github.com/paulgsc/dotfiles/issues/7).)
 
-Nothing in CI can exercise (c)–(g): they all depend on the real
+Nothing in CI can exercise (c)–(f3): they all depend on the real
 WSL ⇄ remote ⇄ Windows-browser topology. CI checks that the flake still
 evaluates and builds; the matrix is what checks that the machine still works.

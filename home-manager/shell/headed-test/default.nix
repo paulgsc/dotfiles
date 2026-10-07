@@ -98,10 +98,10 @@ in {
   home.packages = [
     headed-run
 
-    # Present so the escape hatch and the debugging story are usable directly:
+    # Present so the debugging story is usable directly:
     #   wayland-info          — what does the compositor actually advertise?
-    #   waypipe               — client half of `waypipe ssh` (#24)
+    # (waypipe used to sit here as the client half of `waypipe ssh` (#24); it
+    # is gone with the remote-GUI channel — see nixos/remote-gui.)
     pkgs.wayland-utils
-    pkgs.waypipe
   ];
 }
