@@ -115,8 +115,10 @@
       xkb.variant = "";
     };
 
-    # Enable CUPS to print documents.
-    printing.enable = true;
+    # No CUPS: nothing prints from this box, and cupsd is a network-facing
+    # daemon with a long CVE history.  `false` is also the default; it is
+    # written out so the decision is recorded (security review #7).
+    printing.enable = false;
 
     # Enable sound with pipewire.
     # sound.enable = true;
@@ -136,12 +138,35 @@
     };
 
     # Enable the OpenSSH daemon.
+    #
+    # Threat model (security review #7): assume code on this box can one day be
+    # hostile — a poisoned npm/cargo package, a hijacked agent running as
+    # paulg.  The ssh client is a Windows PC used for banking and email, so
+    # every channel that lets the box reach *back* into the client is refused
+    # here, server-side, regardless of how the client is configured:
+    #
+    #   * AllowAgentForwarding = false — a forwarded agent would let any
+    #     process on the box sign with the Windows key for as long as the
+    #     session lasts.  Git pushes from the box use the box's own
+    #     credentials, so nothing needs it.
+    #   * AllowTcpForwarding = "local" — keeps `ssh -L` (the client reaching
+    #     the box's loopback services) and refuses `ssh -R`, which would open
+    #     a listener on the box that leads back into Windows.
+    #   * AllowStreamLocalForwarding — set in ./remote-gui, next to the other
+    #     remote-GUI refusals; it is the unix-socket channel waypipe used.
+    #
+    # sshd_config(5) is candid that refusing forwarding does not stop a user
+    # with a shell from running their own relay.  What it does stop is the
+    # client *offering* one, which is the half that touches Windows.
     openssh = {
       enable = true;
       settings = {
         PasswordAuthentication = false;
         PermitRootLogin = "no";
         KbdInteractiveAuthentication = false;
+        AllowAgentForwarding = false;
+        AllowTcpForwarding = "local";
+        AllowUsers = ["paulg"];
       };
     };
 
@@ -175,7 +200,7 @@
   users.users.paulg = {
     isNormalUser = true;
     description = "Paul Gathondu";
-    extraGroups = ["networkmanager" "wheel" "docker" "sshfs"];
+    extraGroups = ["networkmanager" "wheel" "docker"];
     openssh.authorizedKeys.keys = [
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMJI8w7UZiLQLavfBW2SAmCPzTc817tgedFhLeakGue"
     ];

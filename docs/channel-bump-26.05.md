@@ -218,11 +218,11 @@ late-night fix on the new generation.
 | 10 | mDNS | `nixos.local` resolves from WSL (avahi) | |
 | 11 | Docker | `docker run --rm hello-world`; existing stack comes up on 28.x | |
 | 12 | Headed E2E | `headed-run pnpm test:e2e` in `some-ui` under the new Wayland stack | |
-| 13 | `waypipe` escape hatch | `waypipe ssh nixos.local <gui-app>` draws on WSLg | |
+| 13 | ~~`waypipe` escape hatch~~ | Retired: waypipe was removed in the security review ([#7](https://github.com/paulgsc/dotfiles/issues/7)); see [remote-gui-wayland.md S2](./remote-gui-wayland.md#s2--the-remote-gui-transport-none-on-purpose) | n/a |
 | 14 | Generations | prior generation still listed and bootable | |
 
 Rows 2–4 re-test [CLIP #15](https://github.com/paulgsc/dotfiles/issues/15);
-rows 6–9 and 12–13 re-test [GUI #16](https://github.com/paulgsc/dotfiles/issues/16).
+rows 6–9 and 12 re-test (13 is retired) [GUI #16](https://github.com/paulgsc/dotfiles/issues/16).
 Both epics' work is Wayland-native by construction — OSC52 over the ssh TTY,
 HTTP over the LAN, cage on wlroots — which is exactly why this bump is
 expected to be dull.
