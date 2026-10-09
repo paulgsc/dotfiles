@@ -65,7 +65,28 @@
     LC_TIME = "en_US.UTF-8";
   };
 
-  virtualisation.docker.enable = true;
+  virtualisation.docker = {
+    enable = true;
+
+    # A port published with no host IP (`docker run -p 8000:8000`, a bare
+    # `'8000:8000'`) binds loopback, not every address on the box (security
+    # review #7).  Docker's published ports are DNAT'd in Docker's own
+    # iptables chains before nixos-fw's INPUT chain sees the packet, so
+    # nothing in nixos/port-configuration can scope them.
+    #
+    # Limit, verified against dockerd 29: this default covers the DEFAULT
+    # bridge only, which is where an ad hoc `docker run -p` lands.  A
+    # user-defined network ignores it and takes its own
+    # `com.docker.network.bridge.host_binding_ipv4` driver option instead,
+    # and every compose stack here (shared-dev-network, some-ui-network) is
+    # one.  Their policy is the explicit host IP each compose `ports:` entry
+    # names (paulgsc/server#416, paulgsc/some-ui#1703).
+    #
+    # Applies when a container is created: running ones keep their bindings.
+    # A changed daemon.json restarts dockerd on switch; live-restore (on by
+    # default here) keeps containers running through it.
+    daemon.settings.ip = "127.0.0.1";
+  };
 
   # GNOME on Wayland.  WAYLANDIA-SESSION #17/#28; rationale in
   # docs/wayland-session.md.
