@@ -72,6 +72,12 @@ With `xclip` uninstalled and `$DISPLAY` unset, over **plain `ssh`** (no `-Y`):
       (**Not** `"+yy` — see "Why `"+yy` is not the ergonomic" below.)
 - [ ] **(d) CLI pipe** — `pocket query | wclip` (see below); paste in Windows.
 - [ ] **(b) again, after reconnect** — `tmux detach`, `tmux attach`, repeat the copy-mode yank.
+- [ ] **(e) Passthrough is off** — inside tmux, `tmux show -g allow-passthrough`
+      prints `off`. Then
+      `printf '\ePtmux;\e\e]2;PASSTHROUGH-ON\a\e\\'` must **not** change
+      the Windows Terminal tab title to `PASSTHROUGH-ON`. (If tmux was already
+      running before the switch, it keeps the old setting until
+      `tmux kill-server` or `tmux source-file ~/.config/tmux/tmux.conf`.)
 
 This is the acceptance gate for [#22](https://github.com/paulgsc/dotfiles/issues/22)
 and was the hard prerequisite for dropping `X11Forwarding` in #16 — so re-run it
@@ -131,6 +137,42 @@ silent. The working form is the standard one:
 set -as terminal-overrides ',*:Ms=\E]52;%p1%s;%p2%s\007'
 ```
 
-This is also why `wclip` kept working while both of these failed: `wclip`
-writes the DCS-wrapped sequence straight to `/dev/tty`, so it rides
-`allow-passthrough` and never touches `Ms` at all.
+At the time, `wclip` kept working while both of these failed, because it
+wrapped its sequence in a DCS `\ePtmux;…` envelope that rode
+`allow-passthrough` and never touched `Ms`. That is no longer true — see the
+next section. Every producer now goes through `Ms`, so a broken `Ms` would
+break all of them at once, and rows (a)–(d) would all fail together.
+
+## Why everything goes through `Ms` now: `allow-passthrough off`
+
+`allow-passthrough on` let *any* program printing into a tmux pane hand raw
+escape sequences straight to Windows Terminal, bypassing tmux's own parser —
+`cat` of a hostile log file, output from a poisoned npm or cargo build. The
+security review ([#7](https://github.com/paulgsc/dotfiles/issues/7)) assumes
+code on the box may one day be hostile, and the terminal on the other end is
+the Windows PC. Only two things needed passthrough: `wclip` and vim's yank,
+both of which wrapped OSC52 in the DCS envelope whenever `$TMUX` was set.
+
+They don't need it. With `set-clipboard on`, tmux itself accepts a **plain**
+OSC52 from a pane, stores it as a buffer, and re-emits it to the outer
+terminal through `Ms` — the same path copy-mode uses. So `wclip` and vim now
+emit one plain sequence whether or not tmux is in the way, and
+`allow-passthrough` is `off` (tmux's default, written out).
+
+Checked against the flake's tmux (3.6a) by running a real attached client in a
+pty and reading what reached the "outer terminal":
+
+| `allow-passthrough` | plain OSC52 from a pane | DCS-wrapped OSC52 |
+| --- | --- | --- |
+| `on` (before) | relayed | relayed |
+| `off` (now) | relayed | **dropped, silently** |
+
+The bottom-right cell is the trap: if anything still wraps its OSC52 in
+`\ePtmux;`, the copy now vanishes without an error. If a copy stops arriving
+from one producer only, check it isn't wrapping. Payloads up to 700 KB
+arrived intact on both paths, so there is no size regression.
+
+`wclip` writes to `/dev/tty` rather than calling `tmux load-buffer -w -`:
+`/dev/tty` is always the pane the command actually runs in and works
+identically with no tmux, while `load-buffer` talks to whichever server
+`$TMUX` names, which can be stale in a nested or re-attached shell.

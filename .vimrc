@@ -57,14 +57,12 @@ set statusline=\ %{HasPaste()}%F%m%r%h\ %w\ \ CWD:\ %r%{getcwd()}%h\ \ \ Line:\ 
 
 " --- OSC52 clipboard yank (WAYLANDIA-CLIP #15/#19) ---
 " "+y / "*y ride the OSC52 escape sequence over the controlling terminal
-" instead of xclip + $DISPLAY. Wrapped for tmux passthrough (see .tmux.conf's
-" `allow-passthrough on`). Mirrors pkgs/vim/default.nix.
+" instead of xclip + $DISPLAY. Plain OSC52 even inside tmux: .tmux.conf's
+" `set-clipboard on` relays it via Ms; `allow-passthrough` is off, so a DCS
+" `\ePtmux;` wrapper would be dropped. Mirrors pkgs/vim/default.nix.
 function! s:OSC52Yank(text) abort
   let b64 = system('base64 | tr -d "\n"', a:text)
   let seq = "\x1b]52;c;" . b64 . "\x07"
-  if !empty($TMUX)
-    let seq = "\x1bPtmux;\x1b" . seq . "\x1b\\"
-  endif
   call writefile([seq], '/dev/tty', 'b')
 endfunction
 

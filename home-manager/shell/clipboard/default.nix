@@ -35,11 +35,18 @@
     fi
     b64=$(${pkgs.coreutils}/bin/base64 <"$spool" | ${pkgs.coreutils}/bin/tr -d '\n')
 
-    if [ -n "''${TMUX:-}" ]; then
-      printf '\033Ptmux;\033\033]52;c;%s\007\033\\' "$b64" >/dev/tty
-    else
-      printf '\033]52;c;%s\007' "$b64" >/dev/tty
-    fi
+    # One plain OSC52, inside tmux or not.  Inside tmux, `set-clipboard on`
+    # makes tmux take the sequence from this pane and relay it to the outer
+    # terminal through its `Ms` capability (home-manager/shell/tmux).  The old
+    # DCS `\ePtmux;…` envelope needed `allow-passthrough on`, which lets any
+    # program printing into a pane — `cat` of a hostile log — talk to Windows
+    # Terminal directly; passthrough is now off and that envelope is dropped.
+    #
+    # Not `tmux load-buffer -w -`: it would reach the server named by $TMUX,
+    # which can be stale or point elsewhere (a nested or detached shell),
+    # while /dev/tty is always the pane this command actually runs in, and the
+    # same line works with no tmux at all.
+    printf '\033]52;c;%s\007' "$b64" >/dev/tty
   '';
 in {
   home.packages = [wclip];
