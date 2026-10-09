@@ -57,11 +57,26 @@ with lib; let
             file_server
           ''}
 
+          # With a real certificate, tell browsers to refuse plain HTTP and
+          # certificate warnings for this name from now on: once seen, there
+          # is no "proceed anyway" button (docs/lan-tls.md, "The user story").
+          ${optionalString cfg.tls.enable ''header Strict-Transport-Security "max-age=31536000"''}
+
           # Allow the user to inject custom Caddyfile snippets (like headers or matchers).
           ${hostCfg.extraConfig}
         '';
+        # Serve the wildcard certificate security.acme fetches below instead of
+        # letting Caddy pick an issuer itself (for *.local that was its own
+        # internal CA, which no other device trusts).
+        useACMEHost = mkIf cfg.tls.enable cfg.baseDomain;
       };
     };
+
+  activeHosts = filterAttrs hostActive cfg.hosts;
+
+  # A DNS label: what Let's Encrypt will put in a certificate. "file_host" is
+  # not one (underscore), and a name the CA refuses fails the whole order.
+  isDnsLabel = name: builtins.match "[a-z0-9]([a-z0-9-]*[a-z0-9])?" name != null;
 in {
   options.services.subdomains = {
     # Main toggle for this entire custom module.
@@ -79,16 +94,49 @@ in {
       description = "The default root domain (e.g., 'mydomain.com').";
     };
 
-    # These 'defaults' are largely placeholders for Caddy since it manages
-    # SSL (ACME) and WebSockets by default without needing manual flags.
-    defaults = {
-      acme = mkOption {
-        type = types.bool;
-        default = true;
+    # One publicly trusted wildcard certificate (*.baseDomain) from Let's
+    # Encrypt, proved through Cloudflare's DNS API (DNS-01), so nothing on
+    # this machine has to be reachable from the internet.  Every device
+    # already trusts it: no mkcert CA to install, no "trust this site".
+    # Walkthrough: docs/lan-tls.md.
+    tls = {
+      enable = mkEnableOption "a Let's Encrypt wildcard certificate for baseDomain via Cloudflare DNS-01";
+
+      cloudflareTokenFile = mkOption {
+        type = types.str;
+        default = "/var/lib/secrets/cloudflare-dns-token";
+        description = ''
+          File holding only a Cloudflare API token with Zone:DNS:Edit on the
+          zone baseDomain lives in.  Read by systemd (LoadCredential), so it
+          can stay root-only and out of the Nix store.
+        '';
       };
-      forceSSL = mkOption {
-        type = types.bool;
-        default = true;
+    };
+
+    # A resolver on this machine that answers baseDomain and every name under
+    # it with this machine's LAN address, and forwards everything else.  Hand
+    # it out as the LAN's DNS server from the router, and those names resolve
+    # even where the router's or ISP's DNS-rebinding filter would drop a
+    # public record that points at a private address.
+    lanDns = {
+      enable = mkEnableOption "a LAN resolver (dnsmasq) answering baseDomain locally";
+
+      address = mkOption {
+        type = types.str;
+        example = "10.0.0.2";
+        description = "This machine's fixed LAN address (reserve it in the router's DHCP).";
+      };
+
+      upstreams = mkOption {
+        type = types.listOf types.str;
+        default = ["1.1.1.1" "1.0.0.1"];
+        description = "Where every other name is forwarded.  Not the ISP's resolver, which may filter.";
+      };
+
+      allowedSubnets = mkOption {
+        type = types.listOf types.str;
+        default = ["10.0.0.0/24"];
+        description = "Who may query it (firewall, via networking.managedPorts).";
       };
     };
 
@@ -143,6 +191,84 @@ in {
       # 2. Map over our 'hosts' list and apply the 'renderCaddy' function to each.
       # mapAttrsToList returns a list of configs, and mkMerge flattens them into one set.
       services.caddy.virtualHosts = mkMerge (mapAttrsToList renderCaddy cfg.hosts);
+    })
+
+    (mkIf cfg.tls.enable {
+      assertions = [
+        {
+          assertion = !(hasSuffix ".local" cfg.baseDomain);
+          message = ''
+            services.subdomains.tls needs a domain you own (e.g. "home.example.com"),
+            not "${cfg.baseDomain}": .local is mDNS-only and no public CA issues for it.
+          '';
+        }
+        {
+          assertion = all isDnsLabel (attrNames activeHosts);
+          message = ''
+            services.subdomains.hosts: with tls enabled every host name must be a DNS
+            label (lowercase letters, digits, inner hyphens); got
+            ${concatStringsSep ", " (filter (n: !isDnsLabel n) (attrNames activeHosts))}.
+          '';
+        }
+        {
+          assertion = all (h: h.domain == null) (attrValues activeHosts);
+          message = ''
+            services.subdomains.hosts.<name>.domain cannot be set with tls enabled:
+            the one wildcard certificate covers only *.${cfg.baseDomain}.
+          '';
+        }
+      ];
+
+      # Caddy's own module adds group = "caddy" and reloadServices = caddy for
+      # any cert a vhost names in useACMEHost, so renewals reach it unattended.
+      security.acme = {
+        acceptTerms = true;
+        certs.${cfg.baseDomain} = {
+          domain = "*.${cfg.baseDomain}";
+          extraDomainNames = [cfg.baseDomain];
+          dnsProvider = "cloudflare";
+          credentialFiles.CLOUDFLARE_DNS_API_TOKEN_FILE = cfg.tls.cloudflareTokenFile;
+          # Ask Cloudflare directly whether the challenge record is up.  This
+          # machine's own resolver (lanDns) answers everything under
+          # baseDomain itself, so it would never show the TXT record.
+          dnsResolver = "1.1.1.1:53";
+        };
+      };
+    })
+
+    (mkIf cfg.lanDns.enable {
+      services.dnsmasq = {
+        enable = true;
+        # Serve the LAN only; this machine keeps resolving through whatever
+        # NetworkManager is handed, so a dnsmasq failure cannot take its own
+        # DNS (and its ACME renewals) down with it.
+        resolveLocalQueries = false;
+        settings = {
+          # baseDomain and everything under it, answered here, never forwarded.
+          address = "/${cfg.baseDomain}/${cfg.lanDns.address}";
+          server = cfg.lanDns.upstreams;
+          no-resolv = true;
+          # Answer only clients on a directly attached subnet.
+          local-service = true;
+          domain-needed = true;
+          bogus-priv = true;
+          # The same protection the router had, kept for every *other* name:
+          # an upstream answer pointing into the LAN is dropped.  Ours is local
+          # data above, so it is not subject to it.
+          stop-dns-rebind = true;
+          cache-size = 1000;
+        };
+      };
+
+      networking.managedPorts.ports = [
+        {
+          port = 53;
+          protocol = "both";
+          service = "dnsmasq";
+          description = "LAN DNS: answers ${cfg.baseDomain} locally (services.subdomains.lanDns)";
+          srcSubnets = cfg.lanDns.allowedSubnets;
+        }
+      ];
     })
   ]);
 }
