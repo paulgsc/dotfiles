@@ -114,30 +114,26 @@ in {
       };
     };
 
-    # A resolver on this machine that answers baseDomain and every name under
-    # it with this machine's LAN address, and forwards everything else.  Hand
-    # it out as the LAN's DNS server from the router, and those names resolve
-    # even where the router's or ISP's DNS-rebinding filter would drop a
-    # public record that points at a private address.
+    # A resolver on this machine (Unbound) for the whole LAN.  It answers
+    # baseDomain and every name under it with this machine's LAN address
+    # from local data, so a router's or ISP's DNS-rebinding filter never sees
+    # those names.  Every other name it resolves itself, from the root
+    # servers down, with DNSSEC validation: no forwarder, so no third-party
+    # resolver sees the LAN's lookups.  Hand it out as the LAN's DNS server
+    # from the router (docs/lan-tls.md step 7).
     lanDns = {
-      enable = mkEnableOption "a LAN resolver (dnsmasq) answering baseDomain locally";
+      enable = mkEnableOption "a recursive LAN resolver (Unbound) answering baseDomain locally";
 
       address = mkOption {
         type = types.str;
         example = "10.0.0.2";
-        description = "This machine's fixed LAN address (reserve it in the router's DHCP).";
-      };
-
-      upstreams = mkOption {
-        type = types.listOf types.str;
-        default = ["1.1.1.1" "1.0.0.1"];
-        description = "Where every other name is forwarded.  Not the ISP's resolver, which may filter.";
+        description = "This machine's fixed IPv4 LAN address (reserve it in the router's DHCP).  Unbound listens here and on loopback only.";
       };
 
       allowedSubnets = mkOption {
         type = types.listOf types.str;
         default = ["10.0.0.0/24"];
-        description = "Who may query it (firewall, via networking.managedPorts).";
+        description = "Who may query it (Unbound access-control, and the firewall via networking.managedPorts).";
       };
     };
 
@@ -229,35 +225,70 @@ in {
           extraDomainNames = [cfg.baseDomain];
           dnsProvider = "cloudflare";
           credentialFiles.CLOUDFLARE_DNS_API_TOKEN_FILE = cfg.tls.cloudflareTokenFile;
-          # Ask Cloudflare directly whether the challenge record is up.  This
-          # machine's own resolver (lanDns) answers everything under
-          # baseDomain itself, so it would never show the TXT record.
-          dnsResolver = "1.1.1.1:53";
+          # lego finds the zone through a recursive resolver, then asks the
+          # zone's own nameservers whether the TXT record is up.  With lanDns
+          # on, use this machine's Unbound, which leaves _acme-challenge
+          # names to recursion (below); without it, the system resolver.
+          dnsResolver = mkIf cfg.lanDns.enable "127.0.0.1:53";
         };
       };
     })
 
     (mkIf cfg.lanDns.enable {
-      services.dnsmasq = {
+      assertions = [
+        {
+          assertion = builtins.match "([0-9]{1,3}\\.){3}[0-9]{1,3}" cfg.lanDns.address != null;
+          message = ''
+            services.subdomains.lanDns.address must be this machine's IPv4 LAN address
+            (the router's DHCP reservation, docs/lan-tls.md step 1); got "${cfg.lanDns.address}".
+          '';
+        }
+      ];
+
+      services.unbound = {
         enable = true;
         # Serve the LAN only; this machine keeps resolving through whatever
-        # NetworkManager is handed, so a dnsmasq failure cannot take its own
-        # DNS (and its ACME renewals) down with it.
+        # NetworkManager is handed, so an Unbound failure cannot take its own
+        # DNS down with it.  ACME asks 127.0.0.1 explicitly (above).
         resolveLocalQueries = false;
-        settings = {
-          # baseDomain and everything under it, answered here, never forwarded.
-          address = "/${cfg.baseDomain}/${cfg.lanDns.address}";
-          server = cfg.lanDns.upstreams;
-          no-resolv = true;
-          # Answer only clients on a directly attached subnet.
-          local-service = true;
-          domain-needed = true;
-          bogus-priv = true;
-          # The same protection the router had, kept for every *other* name:
-          # an upstream answer pointing into the LAN is dropped.  Ours is local
-          # data above, so it is not subject to it.
-          stop-dns-rebind = true;
-          cache-size = 1000;
+        settings.server = {
+          # The LAN address and loopback, not 0.0.0.0: Docker's bridges make
+          # this machine multihomed, and a wildcard bind can answer from the
+          # wrong source address.  ip-freebind (module default) lets Unbound
+          # start before DHCP has handed the address out.
+          interface = ["127.0.0.1" cfg.lanDns.address];
+          access-control = ["127.0.0.0/8 allow"] ++ map (net: "${net} allow") cfg.lanDns.allowedSubnets;
+
+          # baseDomain and every name under it: this machine, from local data.
+          local-zone = [
+            ''"${cfg.baseDomain}." redirect''
+            # ...except ACME's challenge names, which must resolve for real
+            # (from Cloudflare's nameservers) for lego's propagation check.
+            ''"_acme-challenge.${cfg.baseDomain}." transparent''
+          ];
+          local-data = [''"${cfg.baseDomain}. A ${cfg.lanDns.address}"''];
+
+          # DNS-rebinding protection for every *other* name: an answer from
+          # the internet that points into a private range is dropped.  Local
+          # data above is not subject to it.
+          private-address = [
+            "10.0.0.0/8"
+            "172.16.0.0/12"
+            "192.168.0.0/16"
+            "169.254.0.0/16"
+            "fd00::/8"
+            "fe80::/10"
+          ];
+
+          # Leak as little as the protocol allows: send each nameserver only
+          # the labels it needs (the default, made explicit), say nothing
+          # about this server.
+          qname-minimisation = true;
+          hide-identity = true;
+          hide-version = true;
+          # Refresh popular names before they expire, so the LAN rarely
+          # waits on a full recursion.
+          prefetch = true;
         };
       };
 
@@ -265,8 +296,8 @@ in {
         {
           port = 53;
           protocol = "both";
-          service = "dnsmasq";
-          description = "LAN DNS: answers ${cfg.baseDomain} locally (services.subdomains.lanDns)";
+          service = "unbound";
+          description = "LAN DNS (Unbound): answers ${cfg.baseDomain} locally, resolves the rest itself (services.subdomains.lanDns)";
           srcSubnets = cfg.lanDns.allowedSubnets;
         }
       ];
