@@ -28,9 +28,12 @@ machine.
 
 ## One-time setup
 
-Run this on the NixOS machine, in the dotfiles checkout. `sops`, `age` and `ssh-to-age`
-come from home-manager. Before your next `home-manager switch`, prefix the commands
-with `nix shell nixpkgs#sops nixpkgs#age nixpkgs#ssh-to-age -c`.
+Run this on the NixOS machine, in the dotfiles checkout. First open a shell with the
+three tools it uses (nothing gets installed permanently):
+
+```sh
+nix shell nixpkgs#sops nixpkgs#age nixpkgs#ssh-to-age
+```
 
 1. **Make your admin key** (once, ever, not once per machine):
 
@@ -71,6 +74,8 @@ with `nix shell nixpkgs#sops nixpkgs#age nixpkgs#ssh-to-age -c`.
    ```
 
 ## Day to day
+
+Each `sops` command below runs inside `nix shell nixpkgs#sops nixpkgs#ssh-to-age`.
 
 **Change a value:** run `sops secrets/nixos.yaml`, edit, save, commit, rebuild. To have a
 service restart when its secret changes, set `restartUnits = ["<unit>.service"];` on the
