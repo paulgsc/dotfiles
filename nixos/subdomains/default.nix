@@ -104,11 +104,12 @@ in {
 
       cloudflareTokenFile = mkOption {
         type = types.str;
-        default = "/var/lib/secrets/cloudflare-dns-token";
         description = ''
-          File holding only a Cloudflare API token with Zone:DNS:Edit on the
-          zone baseDomain lives in.  Read by systemd (LoadCredential), so it
-          can stay root-only and out of the Nix store.
+          Runtime path of a file holding only a Cloudflare API token with
+          Zone:DNS:Edit on the zone baseDomain lives in.  Read by systemd
+          (LoadCredential), so it never enters the Nix store.  nixos/secrets
+          sets it to the sops-nix secret; there is deliberately no default
+          path for someone to remember to fill.
         '';
       };
     };

@@ -19,6 +19,7 @@
     ./ports
     ./port-configuration
     ./subdomains
+    ./secrets
   ];
 
   nixpkgs = {

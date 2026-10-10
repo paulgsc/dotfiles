@@ -1,0 +1,19 @@
+# Who can decrypt secrets/*.yaml.  How-to: docs/secrets.md.
+#
+# - admin: your own age key (~/.config/sops/age/keys.txt).  The one key you
+#   back up (password manager).  It is how you edit secrets and re-encrypt
+#   them for a new machine.
+# - one entry per machine: its SSH host key, converted with ssh-to-age.  A
+#   reinstall makes a new host key: replace the entry, `sops updatekeys`.
+#
+# The placeholders below are deliberately not valid keys, so sops refuses to
+# encrypt anything until the bootstrap in docs/secrets.md has filled them.
+keys:
+  - &admin age1REPLACE_WITH_YOUR_ADMIN_PUBLIC_KEY
+  - &nixos age1REPLACE_WITH_THE_NIXOS_HOST_KEY
+creation_rules:
+  - path_regex: secrets/nixos\.yaml$
+    key_groups:
+      - age:
+          - *admin
+          - *nixos

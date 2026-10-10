@@ -32,6 +32,11 @@
     curl
     caddy
 
+    # Secrets (docs/secrets.md): edit secrets/*.yaml, make keys
+    sops
+    age
+    ssh-to-age
+
     # Shell Enahancements
     fzf
     vim-custom

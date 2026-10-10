@@ -80,17 +80,26 @@ template **Edit zone DNS** → under _Zone Resources_ choose _Include · Specifi
 
 This token can only edit DNS for this one zone. Don't use the Global API Key.
 
-### 3. Put the token on this machine (never in git)
+### 3. Store the token as an encrypted secret
+
+The token goes into `secrets/nixos.yaml`, encrypted and committed with everything else
+(sops-nix). Every machine decrypts it at boot with its own SSH host key, into
+`/run/secrets/cloudflare-dns-token`. There is no file to copy onto a machine and nothing
+to remember per machine.
+
+If you haven't done the one-time setup yet, follow [docs/secrets.md](secrets.md) →
+"One-time setup". Then add the token:
 
 ```sh
-sudo install -d -m 0700 /var/lib/secrets
-sudo sh -c 'umask 077; cat > /var/lib/secrets/cloudflare-dns-token'
-# paste the token, press Enter, then Ctrl-D
-sudo ls -l /var/lib/secrets/cloudflare-dns-token   # -rw------- root root
+sops secrets/nixos.yaml
+# add this line, save, quit:
+#   cloudflare-dns-token: <the token from step 2>
+git add secrets/nixos.yaml && git commit -m "secrets: cloudflare-dns-token"
 ```
 
-The file holds only the token. systemd hands it to the ACME service as a credential
-(`LoadCredential`), so it stays root-only and never enters the Nix store.
+`nixos/secrets` declares this secret as soon as `tls.enable` is on. A build where
+`secrets/nixos.yaml` is missing, or doesn't contain `cloudflare-dns-token`, fails with a
+message saying which.
 
 ### 4. Publish the fallback record in Cloudflare
 
@@ -218,7 +227,7 @@ how other devices reach this machine.
 
 | Symptom | Likely cause | Fix |
 | ------- | ------------ | --- |
-| `acme-*` unit fails with `403` / `Authentication error` | Token scoped to the wrong zone, or the file has extra text | Re-create the token for `<domain>` (step 2); file holds only the token |
+| `acme-*` unit fails with `403` / `Authentication error` | Token scoped to the wrong zone, or a wrong value in the secret | Re-create the token for `<domain>` (step 2), `sops secrets/nixos.yaml` to replace it, rebuild |
 | `acme-*` fails with `NXDOMAIN` / `could not find zone` | `baseDomain` isn't under a zone in this Cloudflare account | `baseDomain` must end in `<domain>` exactly |
 | `too many failed authorizations` / `rateLimited` | Repeated failing attempts hit Let's Encrypt's limits | Fix the cause, wait an hour; while experimenting set `security.acme.defaults.server = "https://acme-staging-v02.api.letsencrypt.org/directory";` (untrusted test certs), then remove it |
 | One device: `DNS_PROBE_FINISHED_NXDOMAIN` | It uses neither LAN DNS nor a non-filtering resolver | Check its Private DNS / Secure DNS setting; renew its lease |
