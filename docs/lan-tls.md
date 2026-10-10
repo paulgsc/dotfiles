@@ -59,19 +59,41 @@ through.
 Placeholder: `10.0.0.X` is this machine's LAN address. The domain is `maishatu.com`, and
 the services live under `home.maishatu.com`.
 
-### 1. Give this machine a fixed LAN address
+### 1. Give this machine an address that never changes
 
-Find its current address and MAC:
+**Why:** your router hands each device an address when it joins the network (DHCP), and
+can hand out a different one next time, after a reboot or a power cut. Unbound tells
+every device "`file-host.home.maishatu.com` is at 10.0.0.X", so X has to stay put.
+
+**Find the current address.** On this machine:
 
 ```sh
-ip -4 -br addr        # e.g. enp3s0  UP  10.0.0.23/24
-ip -br link           # MAC of the same interface
+ip -4 -br addr
 ```
 
-In the router's admin page, add a **DHCP reservation** (also called "static lease" or
-"address reservation") that ties that MAC to that address. Everything below points at
-this address, so it can't be allowed to change. It must be inside `10.0.0.0/24`, the
-subnet the firewall admits.
+```
+lo        UNKNOWN  127.0.0.1/8
+enp3s0    UP       10.0.0.23/24      ← this line: the address is 10.0.0.23
+docker0   DOWN     172.17.0.1/16
+```
+
+Take the line that starts with `10.0.0.` and drop the `/24`. That's the address.
+
+**Make the router always give it that address** ("DHCP reservation", "reserved IP",
+"static lease": all the same thing). On an Xfinity gateway, either:
+
+- **Xfinity app:** WiFi → find this machine in the device list (probably `nixos`) →
+  **Reserve IP**, or
+- **Browser:** open `http://10.0.0.1`, sign in with the gateway's admin password (on its
+  label unless you changed it) → **Connected Devices → Devices** → this machine → **Edit**
+  → **Reserved IP**, set to the address above.
+
+Routers find the device by its hardware (MAC) address. If yours asks for it, it's on the
+same line of `ip -br link` (e.g. `enp3s0 UP aa:bb:cc:dd:ee:ff`). Usually you just pick the
+device from a list.
+
+Then put the address in `nixos/configuration.nix` as `lanAddress` (step 5). Xfinity
+gateways use `10.0.0.x` by default, which is the range this config's firewall lets in.
 
 ### 2. Create a Cloudflare API token
 
@@ -189,6 +211,18 @@ is enough.
   choose **"With your current service provider"** (or turn it off), not a named
   provider.
 
+**On an Xfinity gateway**, check before you plan on the above. Open `http://10.0.0.1` →
+**Gateway → Connection → Local IP Network** and look for a DNS server field. Many Xfinity
+gateways don't let you change the DNS server they hand out at all. They also give devices
+Xfinity's own **IPv6** DNS servers, which a phone may use alongside or instead of
+Unbound. If there's no DNS field, the realistic options are:
+
+- **Your own router behind the gateway (most robust).** Put the Xfinity gateway in
+  **bridge mode** (Gateway → At a Glance → Bridge Mode) and plug in any router whose
+  DHCP DNS setting you control. Your own router then does what this step describes.
+- **Set the DNS on each device** (below). This works with the gateway as it is. Devices
+  may still use Xfinity's IPv6 DNS servers for some lookups, so test each one with step 8.
+
 **If the router can't change the DNS server** (common on ISP-supplied routers), set it on
 each device instead:
 
@@ -220,6 +254,38 @@ those devices still trust anything that CA signs:
 
 `mkcert` itself can stay installed for `localhost`-only development. It just stops being
 how other devices reach this machine.
+
+## What this exposes
+
+**To the internet: nothing new.** No port is forwarded. The gateway blocks unsolicited
+inbound traffic, and this machine's firewall only admits `10.0.0.0/24` on 53, 80 and
+443. Fetching the certificate goes *outward* (to Cloudflare's API and Let's Encrypt);
+nothing has to reach in.
+
+**To devices on your network:**
+
+- **New: DNS on port 53 (Unbound).** Any device on the LAN can ask it to look names up.
+  That's its job. It refuses anyone outside `10.0.0.0/24`, listens only on this machine's
+  LAN address and loopback, and is a widely deployed, security-focused resolver.
+- **Unchanged: HTTPS on 443 (Caddy).** It was already open to the LAN.
+- **More eggs in one basket.** This machine now answers every device's DNS. If it's
+  compromised, an attacker could send devices to wrong addresses. HTTPS limits the damage:
+  a fake `bank.com` still can't produce a certificate your phone trusts. DNSSEC means
+  forged answers from outside are rejected, which your ISP's resolver didn't guarantee.
+
+**Off the network: the keys that matter.**
+
+- **The Cloudflare API token** can edit `maishatu.com`'s DNS records. With it, someone
+  could point your names elsewhere or get a certificate for them. It's limited to DNS on
+  this one zone and stored encrypted (docs/secrets.md). If it leaks, delete it in the
+  Cloudflare dashboard and make a new one.
+- **Your Cloudflare account** controls the domain itself. Turn on two-factor
+  authentication; it's worth more than anything in this file.
+
+**Shrinks: the mkcert root CA.** Right now every device that trusts mkcert's CA would
+accept a certificate for *any* site (`google.com` included) signed by the key in
+`~/.local/share/mkcert` on your machine. Step 9 removes that trust. After it, devices
+trust only certificates that public CAs issue and log publicly.
 
 ## Living with it
 
