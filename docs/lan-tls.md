@@ -1,6 +1,7 @@
 # Trusted HTTPS on the LAN
 
-Module: `nixos/subdomains` (`services.subdomains.tls` and `services.subdomains.lanDns`).
+Module: `nixos/subdomains` (`services.subdomains.tls`; `services.subdomains.lanDns` only
+as a fallback).
 
 ## The user story
 
@@ -14,16 +15,16 @@ through.
 ## How it fits together
 
 ```
-   Cloudflare (authoritative DNS for maishatu.com)         Let's Encrypt
-        ▲  1. lego adds/removes a TXT record                  │ 2. reads it,
-        │     with the API token                              │    issues *.home.maishatu.com
- ┌── nixos box (10.0.0.X) ─────────────────────────────────────┴───────┐
- │ security.acme (lego) ─► cert, renewed ─► Caddy :443 ─► services     │
- │ Unbound :53  home.maishatu.com, *.home.maishatu.com → 10.0.0.X      │
- │              everything else → resolved itself, from the root down  │
- └──────────────▲───────────────────────────────────▲─────────────────┘
-                │ DNS (router hands out 10.0.0.X)   │ HTTPS, stays on the LAN
-          phones, laptops, desktops ────────────────┘
+   Cloudflare (DNS for maishatu.com)                       Let's Encrypt
+     *.home.maishatu.com → 10.0.0.X                             │ 2. reads it,
+        ▲  1. lego adds/removes a TXT record                     │    issues *.home.maishatu.com
+        │     with the API token                                 │
+ ┌── nixos box (10.0.0.X) ───────────────────────────────────────┴──┐
+ │ security.acme (lego) ─► cert, renewed ─► Caddy :443 ─► services  │
+ └───────────────────────────────────────────▲──────────────────────┘
+                                             │ HTTPS, stays on the LAN
+   phone / laptop ── "where is file-host.home.maishatu.com?" ──► the DNS it already
+                     uses (Xfinity's) ──► Cloudflare: "10.0.0.X"
 ```
 
 - **Certificate.** Let's Encrypt checks that you own the domain with the DNS-01 challenge:
@@ -31,39 +32,36 @@ through.
   issues `*.home.maishatu.com`. Nothing on this machine is exposed to the internet: no
   port forwarding, no tunnel. The certificate's private key is made on this machine and
   never leaves it.
-- **Names → this machine.** Some routers and ISPs drop public DNS answers that point at a
-  private address like `10.0.0.X` (DNS-rebinding protection). So the names don't depend on
-  public DNS: Unbound on this machine answers `home.maishatu.com` and every name under it
-  from local data, and the router hands Unbound out as the network's DNS server. Those
-  queries never leave the LAN, so nothing can filter them.
-- **Everything else.** Unbound is a full resolver, not a forwarder: it looks every other
-  name up itself, starting at the root servers, and checks DNSSEC signatures. No
-  third-party resolver (Cloudflare's 1.1.1.1, Google's 8.8.8.8, or the ISP's) is in the
-  path. It also drops any answer from the internet that points into a private range, the
-  same rebinding protection the router had.
+- **Names → this machine.** One public DNS record, `*.home.maishatu.com → 10.0.0.X`.
+  Devices look it up through whatever DNS they already use; nothing changes on the router
+  or on the devices. The address is private, so it's useless to anyone outside your
+  network.
 - **Traffic.** Devices talk to this machine directly over the LAN. Nothing is proxied
   through Cloudflare.
+- **The one thing that can break it.** Some routers and DNS resolvers drop public answers
+  that point at a private address (DNS-rebinding protection). Step 5 tests for that before
+  you change anything on this machine. Only if it fails do you need the LAN DNS server in
+  "Only if step 5 failed".
 
 ### Who sees what
 
 | Party | Before (status quo) | After |
 | ----- | ------------------- | ----- |
-| ISP's DNS resolver | Every domain the LAN looks up | Nothing: it is no longer asked |
-| ISP, on the wire | Which servers you connect to, plus your DNS queries | The same. Unbound's queries to nameservers are unencrypted, so the ISP can still read them |
-| Each site's nameservers | Lookups for their own domain, from the ISP's resolver | Lookups for their own domain, from your public IP. With qname minimisation, root and TLD servers only see the part of the name they serve (e.g. `com.`) |
-| Cloudflare | Nothing | An API call to add/remove one random TXT record at each renewal (about every 60 days). It already hosts the domain's DNS |
-| Let's Encrypt / the public | Nothing | `*.home.maishatu.com` and `home.maishatu.com` in Certificate Transparency logs. Not the service names |
+| Your DNS resolver (Xfinity's) | Every domain the LAN looks up | The same, plus lookups of `*.home.maishatu.com` |
+| Cloudflare | Nothing | Lookups of `*.home.maishatu.com`, arriving from Xfinity's resolver (not from your IP), and an API call adding/removing one random TXT record at each renewal (about every 60 days) |
+| Let's Encrypt / the public | Nothing | `*.home.maishatu.com` in Certificate Transparency logs (not the service names), and the public record showing the private address `10.0.0.X` |
 
 ## Steps
 
-Placeholder: `10.0.0.X` is this machine's LAN address. The domain is `maishatu.com`, and
-the services live under `home.maishatu.com`.
+Placeholder: `10.0.0.X` is this machine's LAN address from step 1. Steps 1-5 change
+nothing on this machine; step 6 is the switch.
 
 ### 1. Give this machine an address that never changes
 
 **Why:** your router hands each device an address when it joins the network (DHCP), and
-can hand out a different one next time, after a reboot or a power cut. Unbound tells
-every device "`file-host.home.maishatu.com` is at 10.0.0.X", so X has to stay put.
+can hand out a different one next time, after a reboot or a power cut. The DNS record
+in step 4 tells every device "`file-host.home.maishatu.com` is at 10.0.0.X", so X has to
+stay put.
 
 **Find the current address.** On this machine:
 
@@ -92,8 +90,8 @@ Routers find the device by its hardware (MAC) address. If yours asks for it, it'
 same line of `ip -br link` (e.g. `enp3s0 UP aa:bb:cc:dd:ee:ff`). Usually you just pick the
 device from a list.
 
-Then put the address in `nixos/configuration.nix` as `lanAddress` (step 5). Xfinity
-gateways use `10.0.0.x` by default, which is the range this config's firewall lets in.
+Write the address down for step 4. Xfinity gateways use `10.0.0.x` by default, which is
+the range this config's firewall lets in.
 
 ### 2. Create a Cloudflare API token
 
@@ -124,10 +122,7 @@ git add secrets/nixos.yaml && git commit -m "secrets: cloudflare-dns-token"
 `secrets/nixos.yaml` is missing, or doesn't contain `cloudflare-dns-token`, fails with a
 message saying which.
 
-### 4. (Optional) Publish a public record for devices that skip the LAN DNS
-
-Skip this unless some device won't use the LAN DNS (step 7). Let's Encrypt doesn't need it,
-and every device on the LAN DNS gets its answer from Unbound.
+### 4. Publish the record in Cloudflare
 
 dash.cloudflare.com → `maishatu.com` → **DNS → Records → Add record**:
 
@@ -135,55 +130,105 @@ dash.cloudflare.com → `maishatu.com` → **DNS → Records → Add record**:
 | ---- | -------- | ------------ | ------------------------- |
 | A    | `*.home` | `10.0.0.X`   | **DNS only** (grey cloud) |
 
-It must be grey: Cloudflare's proxy (orange) can't reach a private address. It adds no new
-party, since Cloudflare already serves this domain's DNS, but it does publish your private
-address (harmless: unreachable from outside), and routers or resolvers with rebind
-protection will still drop it.
+It must be grey: Cloudflare's proxy (orange) can't reach a private address, and grey means
+Cloudflare only answers lookups and never carries your traffic.
 
-### 5. Flip the switch in `nixos/configuration.nix`
+### 5. Test that the record reaches your devices
 
-The `subdomains` block starts with two values. Set the address from step 1 and flip the
-switch:
+Before touching this machine, check that nothing between your devices and Cloudflare
+drops the answer. Give it a few minutes after step 4, then on **each kind of device**:
+
+- **Laptop/desktop (any OS):** `nslookup test.home.maishatu.com`
+- **Android:** open Chrome and go to `http://test.home.maishatu.com`. If the name
+  resolves, you get an error from Caddy on this machine, or a connection error, but
+  *not* `DNS_PROBE_FINISHED_NXDOMAIN`. Do this on Wi-Fi, not mobile data.
+
+`nslookup` should answer `10.0.0.X`. If every device does, you're done with DNS: no LAN DNS
+server, no port 53, no router changes. Go to step 6.
+
+If a device gets no answer (`NXDOMAIN`, `can't find`, `Non-existent domain`), something is
+filtering it. Try `nslookup test.home.maishatu.com 1.1.1.1`. If *that* answers, your
+resolver filters private answers: see "Only if step 5 failed".
+
+### 6. Flip the switch in `nixos/configuration.nix`
+
+At the top of the `subdomains` block:
 
 ```nix
 trustedLan = true;
-lanAddress = "10.0.0.X";
 ```
 
-`trustedLan` moves `baseDomain` from `nixos.local` to `home.maishatu.com` and turns on
-`tls` and `lanDns` together. Then rebuild:
+That moves `baseDomain` from `nixos.local` to `home.maishatu.com` and turns on `tls`.
+Then rebuild:
 
 ```sh
 sudo nixos-rebuild switch --flake .#nixos
 ```
 
-The build refuses to evaluate, with a message saying why, when `lanAddress` isn't an IPv4
-address (the committed `"10.0.0.?"` isn't), when `secrets/nixos.yaml` lacks the token,
-when a host name is not a valid DNS label (`file_host` with an underscore isn't), or when
-a host overrides `domain`, which the wildcard certificate wouldn't cover.
+The build refuses to evaluate, with a message saying why, when `secrets/nixos.yaml` lacks
+the token, when a host name is not a valid DNS label (`file_host` with an underscore
+isn't), or when a host overrides `domain`, which the wildcard certificate wouldn't cover.
 
-### 6. Check it on the machine itself
+### 7. Check it on the machine itself
 
 ```sh
-# the certificate: issuer Let's Encrypt, names *.home.maishatu.com and home.maishatu.com
+# the certificate: issuer Let's Encrypt, name *.home.maishatu.com
 journalctl -u 'acme-*' -n 50 --no-pager
 sudo openssl x509 -in /var/lib/acme/home.maishatu.com/cert.pem -noout \
   -issuer -ext subjectAltName -enddate
-
-# LAN DNS answers home names locally...
-nix shell nixpkgs#dnsutils -c dig +short @10.0.0.X file-host.home.maishatu.com   # → 10.0.0.X
-# ...and resolves everything else itself, with DNSSEC ("ad" in the flags line)
-nix shell nixpkgs#dnsutils -c dig @10.0.0.X nixos.org | grep -E 'flags|status'
-# ...and refuses a forged signature (status: SERVFAIL)
-nix shell nixpkgs#dnsutils -c dig @10.0.0.X dnssec-failed.org | grep status
 
 # Caddy serves the certificate (no -k: it must verify with the system trust store)
 curl -sI --resolve file-host.home.maishatu.com:443:127.0.0.1 https://file-host.home.maishatu.com
 ```
 
-### 7. Make the network use the LAN DNS
+### 8. Check it on every device
 
-In the router's **LAN / DHCP settings**, set the **DNS server** handed to clients to
+Open `https://file-host.home.maishatu.com`. You should see the lock icon with no warning, and
+the certificate viewer should say _Issued by: Let's Encrypt_. If a device can't find the
+name, see Troubleshooting.
+
+### 9. Retire mkcert's trust
+
+Once every device works, remove the mkcert root CA wherever it was installed. Until you do,
+those devices still trust anything that CA signs:
+
+- **Desktop with mkcert:** `mkcert -uninstall`.
+- **Android:** Settings → Security & privacy → More security settings → **Encryption &
+  credentials → User credentials**. Remove the `mkcert` entry.
+
+`mkcert` itself can stay installed for `localhost`-only development. It just stops being
+how other devices reach this machine.
+
+## Only if step 5 failed: a LAN DNS server
+
+This adds Unbound on this machine as the network's DNS server. It answers
+`*.home.maishatu.com` itself, so no filter between you and Cloudflare is involved, and
+resolves every other name itself, from the root servers down, with DNSSEC validation. No
+third-party resolver is added. The cost: **port 53 open to the LAN**, this machine becomes
+every device's DNS (if it's off, the LAN has no DNS), and the router or each device has to
+be pointed at it.
+
+Turn it on next to `tls.enable` in the `subdomains` block:
+
+```nix
+lanDns = {
+  enable = trustedLan;
+  address = "10.0.0.X";   # step 1
+};
+```
+
+The build refuses a value that isn't an IPv4 address. After rebuilding, check it:
+
+```sh
+# answers home names locally...
+nix shell nixpkgs#dnsutils -c dig +short @10.0.0.X file-host.home.maishatu.com   # → 10.0.0.X
+# ...resolves everything else itself, with DNSSEC ("ad" in the flags line)
+nix shell nixpkgs#dnsutils -c dig @10.0.0.X nixos.org | grep -E 'flags|status'
+# ...and refuses a forged signature (status: SERVFAIL)
+nix shell nixpkgs#dnsutils -c dig @10.0.0.X dnssec-failed.org | grep status
+```
+
+Then point the network at it. In the router's **LAN / DHCP settings**, set the **DNS server** handed to clients to
 `10.0.0.X`.
 
 **The secondary DNS server** is a trade-off, because devices use it now and then even
@@ -193,10 +238,10 @@ while the primary is up:
   If this machine is off, the LAN has no DNS until it's back.
 - **Set it to the router's own address.** The internet keeps resolving while this machine
   is off, through the ISP as before. But a device that happens to use it gets
-  `*.home.maishatu.com` only from the optional public record (step 4), and only if the
-  router or ISP doesn't filter it. Expect an occasional "site can't be reached" for a home
-  name. Don't add a public resolver here (1.1.1.1, 8.8.8.8): that brings back the
-  middleman this setup removes.
+  `*.home.maishatu.com` only from the public record (step 4), which step 5 showed gets
+  filtered. Expect an occasional "site can't be reached" for a home name. Don't add a
+  public resolver here (1.1.1.1, 8.8.8.8): that brings in a middleman the status quo
+  doesn't have.
 
 Devices pick up the new DNS server when they renew their lease. Toggling Wi-Fi off and on
 is enough.
@@ -221,7 +266,8 @@ Unbound. If there's no DNS field, the realistic options are:
   **bridge mode** (Gateway → At a Glance → Bridge Mode) and plug in any router whose
   DHCP DNS setting you control. Your own router then does what this step describes.
 - **Set the DNS on each device** (below). This works with the gateway as it is. Devices
-  may still use Xfinity's IPv6 DNS servers for some lookups, so test each one with step 8.
+  may still use Xfinity's IPv6 DNS servers for some lookups, so test each one with step 5's
+  `nslookup`.
 
 **If the router can't change the DNS server** (common on ISP-supplied routers), set it on
 each device instead:
@@ -237,41 +283,22 @@ each device instead:
 Another option is to turn the router's DHCP off and let this machine serve DHCP too.
 That's a bigger change and isn't covered here.
 
-### 8. Check it on every device
-
-Open `https://file-host.home.maishatu.com`. You should see the lock icon with no warning, and
-the certificate viewer should say _Issued by: Let's Encrypt_. If a device can't find the
-name, see Troubleshooting.
-
-### 9. Retire mkcert's trust
-
-Once every device works, remove the mkcert root CA wherever it was installed. Until you do,
-those devices still trust anything that CA signs:
-
-- **Desktop with mkcert:** `mkcert -uninstall`.
-- **Android:** Settings → Security & privacy → More security settings → **Encryption &
-  credentials → User credentials**. Remove the `mkcert` entry.
-
-`mkcert` itself can stay installed for `localhost`-only development. It just stops being
-how other devices reach this machine.
-
 ## What this exposes
 
 **To the internet: nothing new.** No port is forwarded. The gateway blocks unsolicited
-inbound traffic, and this machine's firewall only admits `10.0.0.0/24` on 53, 80 and
-443. Fetching the certificate goes *outward* (to Cloudflare's API and Let's Encrypt);
+inbound traffic, and this machine's firewall only admits `10.0.0.0/24` on 80 and 443
+(already open before this change). Fetching the certificate goes *outward* (to Cloudflare's API and Let's Encrypt);
 nothing has to reach in.
 
 **To devices on your network:**
 
-- **New: DNS on port 53 (Unbound).** Any device on the LAN can ask it to look names up.
-  That's its job. It refuses anyone outside `10.0.0.0/24`, listens only on this machine's
-  LAN address and loopback, and is a widely deployed, security-focused resolver.
-- **Unchanged: HTTPS on 443 (Caddy).** It was already open to the LAN.
-- **More eggs in one basket.** This machine now answers every device's DNS. If it's
-  compromised, an attacker could send devices to wrong addresses. HTTPS limits the damage:
-  a fake `bank.com` still can't produce a certificate your phone trusts. DNSSEC means
-  forged answers from outside are rejected, which your ISP's resolver didn't guarantee.
+- **No new ports.** HTTPS on 443 and the redirect on 80 (Caddy) were already open to the
+  LAN.
+- **Only with the step 5 fallback: DNS on port 53 (Unbound).** Any device on the LAN can
+  ask it to look names up; it refuses anyone outside `10.0.0.0/24` and listens only on
+  this machine's LAN address and loopback. It also makes this machine every device's DNS:
+  if it's compromised, an attacker could send devices to wrong addresses. HTTPS limits
+  that (a fake `bank.com` still can't show a certificate your phone trusts).
 
 **Off the network: the keys that matter.**
 
@@ -292,18 +319,18 @@ trust only certificates that public CAs issue and log publicly.
 - **Renewal is automatic.** A systemd timer (`acme-renew-home.maishatu.com.timer`) re-orders
   the certificate well before it expires, and Caddy reloads it. To see when it next runs:
   `systemctl list-timers 'acme-*'`.
-- **Adding a service** is one entry under `hosts`. The wildcard certificate already covers
-  `<name>.home.maishatu.com`, and Unbound already answers it (so does the `*.home` public
-  record, if you made one). Nothing changes in Cloudflare.
+- **Adding a service** is one entry under `hosts`. The wildcard certificate and the
+  `*.home` record already cover `<name>.home.maishatu.com`. Nothing changes in Cloudflare.
 - **HSTS lasts a year.** Each host sends `Strict-Transport-Security: max-age=31536000`.
   Browsers that have seen it refuse plain HTTP and certificate errors for that name for a
   year, which is the point. It also means you can't quietly move one of these names back
   to HTTP.
 - **What becomes public.** See "Who sees what" above.
-- **If this machine is down, LAN DNS is down with it** (unless you set a secondary, step
-  7). The services on it are down then anyway. Other sites resolve again once it's back.
-- **Unbound keeps its DNSSEC root key current by itself** (`/var/lib/unbound/root.key`).
-  Nothing to renew by hand.
+- **Home names need the internet to resolve**, since the answer comes from Cloudflare.
+  During an internet outage devices may not find `*.home.maishatu.com` (until their DNS
+  cache runs out, they still do). The LAN DNS fallback doesn't have this limit.
+- **With the LAN DNS fallback,** this machine being down takes the LAN's DNS with it
+  (unless you set a secondary). Unbound keeps its DNSSEC root key current by itself.
 
 ## Troubleshooting
 
@@ -312,7 +339,7 @@ trust only certificates that public CAs issue and log publicly.
 | `acme-*` unit fails with `403` / `Authentication error` | Token scoped to the wrong zone, or a wrong value in the secret | Re-create the token for `maishatu.com` (step 2), `sops secrets/nixos.yaml` to replace it, rebuild |
 | `acme-*` fails with `NXDOMAIN` / `could not find zone` | `baseDomain` isn't under a zone in this Cloudflare account | `baseDomain` must end in `maishatu.com` exactly |
 | `too many failed authorizations` / `rateLimited` | Repeated failing attempts hit Let's Encrypt's limits | Fix the cause, wait an hour; while experimenting set `security.acme.defaults.server = "https://acme-staging-v02.api.letsencrypt.org/directory";` (untrusted test certs), then remove it |
-| One device: `DNS_PROBE_FINISHED_NXDOMAIN` for a home name | It isn't using the LAN DNS | Check its Private DNS / Secure DNS settings (step 7); renew its lease; `nslookup file-host.home.maishatu.com` shows which server answered |
-| Every device: some sites won't resolve (`SERVFAIL`) | DNSSEC validation failed, or Unbound can't reach nameservers | `journalctl -u unbound -n 50`. A site with broken DNSSEC fails for everyone using a validating resolver; that's validation working |
-| `dig @10.0.0.X` times out from another device | Firewall or wrong address | `sudo iptables -S nixos-fw \| grep 'dport 53'`; `lanDns.address` must match step 1 |
+| One device: `DNS_PROBE_FINISHED_NXDOMAIN` for a home name | Its DNS drops private answers, or (with the fallback) it isn't using the LAN DNS | Step 5's test on that device; with the fallback, its Private DNS / Secure DNS settings |
+| With the fallback, some sites won't resolve (`SERVFAIL`) | DNSSEC validation failed, or Unbound can't reach nameservers | `journalctl -u unbound -n 50`. A site with broken DNSSEC fails for everyone using a validating resolver; that's validation working |
+| With the fallback, `dig @10.0.0.X` times out from another device | Firewall or wrong address | `sudo iptables -S nixos-fw \| grep 'dport 53'`; `lanDns.address` must match step 1 |
 | Browser warns `NET::ERR_CERT_COMMON_NAME_INVALID` | Name is two labels deep (`a.b.home.maishatu.com`) or not under `home.maishatu.com` | The wildcard covers one label: `<name>.home.maishatu.com` |

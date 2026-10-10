@@ -181,13 +181,11 @@
     };
 
     subdomains = let
-      # docs/lan-tls.md step 5: the one switch.  Flip it once steps 1-4 are
-      # done: the router reserves lanAddress for this machine, and
-      # secrets/nixos.yaml holds cloudflare-dns-token.  Until then the
-      # subdomains stay on nixos.local with Caddy's own internal CA, as before.
+      # docs/lan-tls.md step 6: the one switch.  Flip it once steps 1-5 are
+      # done (secrets/nixos.yaml holds cloudflare-dns-token, and the public
+      # *.home record reaches your devices).  Until then the subdomains stay
+      # on nixos.local with Caddy's own internal CA, as before.
       trustedLan = false;
-      # Step 1: the address the router's DHCP reservation gives this machine.
-      lanAddress = "10.0.0.?";
     in {
       enable = true;
       backend = "caddy";
@@ -196,10 +194,9 @@
         then "home.maishatu.com"
         else "nixos.local";
       tls.enable = trustedLan;
-      lanDns = {
-        enable = trustedLan;
-        address = lanAddress;
-      };
+      # No lanDns: devices find *.home.maishatu.com through the public record
+      # and the DNS they already use.  docs/lan-tls.md, "Only if step 5
+      # failed", is the fallback; it opens port 53 and needs router changes.
 
       hosts = {
         # A DNS label (no underscore), so a public certificate can name it.

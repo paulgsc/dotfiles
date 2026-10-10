@@ -114,6 +114,10 @@ in {
       };
     };
 
+    # Off by default, and only needed when the public *.baseDomain record
+    # doesn't reach devices (a router or resolver dropping private-address
+    # answers): docs/lan-tls.md, "Only if step 5 failed".
+    #
     # A resolver on this machine (Unbound) for the whole LAN.  It answers
     # baseDomain and every name under it with this machine's LAN address
     # from local data, so a router's or ISP's DNS-rebinding filter never sees
@@ -221,8 +225,9 @@ in {
       security.acme = {
         acceptTerms = true;
         certs.${cfg.baseDomain} = {
+          # The wildcard alone: nothing is served at baseDomain itself, so
+          # the bare name is not in the certificate.
           domain = "*.${cfg.baseDomain}";
-          extraDomainNames = [cfg.baseDomain];
           dnsProvider = "cloudflare";
           credentialFiles.CLOUDFLARE_DNS_API_TOKEN_FILE = cfg.tls.cloudflareTokenFile;
           # lego finds the zone through a recursive resolver, then asks the
