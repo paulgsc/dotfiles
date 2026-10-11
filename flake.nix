@@ -17,6 +17,11 @@
     # Home manager
     home-manager.url = "github:nix-community/home-manager/release-26.05";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
+
+    # Secrets: encrypted in git under secrets/, decrypted at activation with
+    # each machine's own SSH host key.  See nixos/secrets and docs/secrets.md.
+    sops-nix.url = "github:Mic92/sops-nix";
+    sops-nix.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = {

@@ -60,6 +60,9 @@ with lib; let
           # Allow the user to inject custom Caddyfile snippets (like headers or matchers).
           ${hostCfg.extraConfig}
         '';
+        # With tls on, serve the wildcard certificate fetched below instead of
+        # letting Caddy pick an issuer itself.
+        useACMEHost = mkIf cfg.tls.enable cfg.baseDomain;
       };
     };
 in {
@@ -89,6 +92,23 @@ in {
       forceSSL = mkOption {
         type = types.bool;
         default = true;
+      };
+    };
+
+    # One publicly trusted wildcard certificate (*.baseDomain) from Let's
+    # Encrypt, proved through Cloudflare's DNS API (DNS-01), so nothing on
+    # this machine has to be reachable from the internet.  docs/lan-tls.md.
+    tls = {
+      enable = mkEnableOption "a Let's Encrypt wildcard certificate for baseDomain via Cloudflare DNS-01";
+
+      cloudflareTokenFile = mkOption {
+        type = types.str;
+        description = ''
+          Runtime path of a file holding only a Cloudflare API token with
+          Zone:DNS:Edit on baseDomain's zone.  Read by systemd
+          (LoadCredential), so it never enters the Nix store.  Set by
+          nixos/secrets from the sops-nix secret.
+        '';
       };
     };
 
@@ -143,6 +163,30 @@ in {
       # 2. Map over our 'hosts' list and apply the 'renderCaddy' function to each.
       # mapAttrsToList returns a list of configs, and mkMerge flattens them into one set.
       services.caddy.virtualHosts = mkMerge (mapAttrsToList renderCaddy cfg.hosts);
+    })
+
+    # Caddy's own module adds group = "caddy" and reloadServices = caddy for
+    # a cert a vhost names in useACMEHost, so renewals reach it unattended.
+    (mkIf cfg.tls.enable {
+      # The one certificate is *.baseDomain, which names exactly one label
+      # under baseDomain: a host on another domain, or a name with a dot or
+      # an underscore in it, would be served a certificate that does not
+      # name it.
+      assertions = [
+        {
+          assertion = all (name: builtins.match "[a-z0-9]([a-z0-9-]*[a-z0-9])?" name != null && cfg.hosts.${name}.domain == null) (attrNames cfg.hosts);
+          message = "services.subdomains.hosts: with tls enabled every host name must be one DNS label (lowercase letters, digits, inner hyphens) and no host may set `domain`: the certificate covers only *.${cfg.baseDomain}.";
+        }
+      ];
+
+      security.acme = {
+        acceptTerms = true;
+        certs.${cfg.baseDomain} = {
+          domain = "*.${cfg.baseDomain}";
+          dnsProvider = "cloudflare";
+          credentialFiles.CLOUDFLARE_DNS_API_TOKEN_FILE = cfg.tls.cloudflareTokenFile;
+        };
+      };
     })
   ]);
 }

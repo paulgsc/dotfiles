@@ -62,106 +62,6 @@ _: {
         owner = "docker";
       }
 
-      {
-        port = 5050;
-        protocol = "tcp";
-        service = "openai-edge-tts-proxy";
-        description = "OpenAI Edge TTS proxy (nginx -> python backend)";
-        externalAccess = false;
-        srcSubnets = ["10.0.0.0/24"]; # Docker binds 0.0.0.0:5050
-        owner = "docker";
-      }
-
-      # ═══════════════════════════════════════════════════════════
-      # Development Servers
-      # ═══════════════════════════════════════════════════════════
-      {
-        port = 5173;
-        protocol = "tcp";
-        service = "vite-www";
-        description = "WWW project Vite dev server";
-        externalAccess = false;
-        srcSubnets = ["10.0.0.0/24"]; # Docker binds 0.0.0.0:5173
-      }
-
-      {
-        port = 6006;
-        protocol = "tcp";
-        service = "storybook";
-        description = "Storybook component dev (browser-accessed from LAN via nixos.local)";
-        externalAccess = false;
-        srcSubnets = ["10.0.0.0/24"]; # headless box; browsed from Windows PC over mDNS
-      }
-
-      # ═══════════════════════════════════════════════════════════
-      # Databases & Caches (CRITICAL - Minimize exposure)
-      # ═══════════════════════════════════════════════════════════
-      {
-        port = 6379;
-        protocol = "tcp";
-        service = "redis";
-        description = "Redis - LAN monitoring tools only";
-        externalAccess = false;
-        srcSubnets = ["10.0.0.0/24"]; # Docker binds 0.0.0.0:6379; no auth → LAN-only
-        owner = "docker";
-      }
-
-      {
-        port = 5540;
-        protocol = "tcp";
-        service = "redisinsight";
-        description = "Redis admin UI (browser-accessed from LAN via nixos.local)";
-        externalAccess = false;
-        srcSubnets = ["10.0.0.0/24"];
-        owner = "docker";
-      }
-
-      # ═══════════════════════════════════════════════════════════
-      # Message Queue
-      # ═══════════════════════════════════════════════════════════
-      {
-        port = 4222;
-        protocol = "tcp";
-        service = "nats";
-        description = "NATS client pub/sub";
-        externalAccess = false;
-        srcSubnets = ["10.0.0.0/24"]; # Docker binds 0.0.0.0:4222
-        owner = "docker";
-      }
-
-      {
-        port = 8222;
-        protocol = "tcp";
-        service = "nats";
-        description = "NATS HTTP monitoring API";
-        externalAccess = false;
-        srcSubnets = ["10.0.0.0/24"]; # Docker binds 0.0.0.0:8222
-        owner = "docker";
-      }
-
-      # ═══════════════════════════════════════════════════════════
-      # Observability Stack (localhost only)
-      # ═══════════════════════════════════════════════════════════
-      {
-        port = 3001;
-        protocol = "tcp";
-        service = "grafana";
-        description = "Grafana dashboards (browser-accessed from LAN via nixos.local)";
-        externalAccess = false;
-        srcSubnets = ["10.0.0.0/24"];
-        owner = "docker";
-      }
-
-      {
-        port = 9090;
-        protocol = "tcp";
-        service = "prometheus";
-        description = "Prometheus UI (browser-accessed from LAN via nixos.local)";
-        externalAccess = false;
-        srcSubnets = ["10.0.0.0/24"];
-        owner = "docker";
-      }
-
       # ═══════════════════════════════════════════════════════════
       # Observability Stack — Log Aggregation (paulgsc/server#340)
       # ═══════════════════════════════════════════════════════════
@@ -278,20 +178,6 @@ _: {
         protocol = "tcp";
         service = "typst-preview";
         description = "tinymist live-preview HTTP server (vim binds --data-plane-host nixos.local:3141, matching the browsed URL's host -- tinymist v0.14.18 validates the WebSocket Origin against the bind hostname itself, so a wildcard 0.0.0.0 bind here would make the preview page load but its WebSocket connection fail; this firewall rule still restricts LAN reachability regardless of bind host)";
-        externalAccess = false;
-        srcSubnets = ["10.0.0.0/24"];
-      }
-
-      # ═══════════════════════════════════════════════════════════
-      # Retired / Unused Services
-      # ═══════════════════════════════════════════════════════════
-      {
-        port = 3030;
-        protocol = "tcp";
-        service = "metabase";
-        description = "Metabase Dashboard (browser-accessed from LAN via nixos.local; currently not running)";
-        lastUsed = "2025-10-12";
-        owner = "realtime-team";
         externalAccess = false;
         srcSubnets = ["10.0.0.0/24"];
       }

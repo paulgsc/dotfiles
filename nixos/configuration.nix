@@ -19,6 +19,7 @@
     ./ports
     ./port-configuration
     ./subdomains
+    ./secrets
   ];
 
   nixpkgs = {
@@ -179,15 +180,57 @@
       # publish.workstation = true;
     };
 
-    subdomains = {
+    subdomains = let
+      # docs/lan-tls.md step 6: the one switch.  Flip it once steps 1-5 are
+      # done (secrets/nixos.yaml holds cloudflare-dns-token, and the public
+      # *.home record reaches your devices).  false keeps nixos.local and
+      # Caddy's own internal CA, as before; flipping it back is the rollback.
+      trustedLan = true;
+    in {
       enable = true;
       backend = "caddy";
-      baseDomain = "nixos.local";
+      baseDomain =
+        if trustedLan
+        then "home.maishatu.com"
+        else "nixos.local";
+      tls.enable = trustedLan;
 
       hosts = {
-        "file_host" = {
+        # A DNS label (no underscore), so a public certificate can name it.
+        # Caddy runs on the host, where the container name "file_host" does
+        # not resolve; the container publishes 3000 on the host instead.
+        "file-host" = {
           enable = true;
-          proxyPass = "http://file_host:3000";
+          proxyPass = "http://127.0.0.1:3000";
+        };
+        # The app (paulgsc/some-ui infra/compose/www.yml): its nginx serves
+        # plain HTTP on 5172, and Caddy does the TLS.  /api/file-host and
+        # /api/tts are proxied by that same nginx listener.
+        "www" = {
+          enable = true;
+          proxyPass = "http://127.0.0.1:5172";
+        };
+        # `vite dev` for apps/www, bound to 127.0.0.1:5173 (its
+        # allowedHosts names this host).  Caddy carries the HMR websocket too.
+        "dev" = {
+          enable = true;
+          proxyPass = "http://127.0.0.1:5173";
+        };
+        # Dashboards from paulgsc/server's compose files, each published on
+        # 127.0.0.1 only.  Grafana and Metabase are told these addresses
+        # (GF_SERVER_ROOT_URL, MB_SITE_URL) for their links and redirects.
+        "grafana" = {
+          enable = true;
+          proxyPass = "http://127.0.0.1:3001";
+        };
+        "metabase" = {
+          enable = true;
+          proxyPass = "http://127.0.0.1:3030";
+        };
+        # No login of its own: anyone on the LAN can browse Redis here.
+        "redisinsight" = {
+          enable = true;
+          proxyPass = "http://127.0.0.1:5540";
         };
       };
     };
