@@ -185,7 +185,7 @@
       # done (secrets/nixos.yaml holds cloudflare-dns-token, and the public
       # *.home record reaches your devices).  false keeps nixos.local and
       # Caddy's own internal CA, as before; flipping it back is the rollback.
-      trustedLan = false;
+      trustedLan = true;
     in {
       enable = true;
       backend = "caddy";
@@ -202,6 +202,13 @@
         "file-host" = {
           enable = true;
           proxyPass = "http://127.0.0.1:3000";
+        };
+        # The app (paulgsc/some-ui infra/compose/www.yml): its nginx serves
+        # plain HTTP on 5172, and Caddy does the TLS.  /api/file-host and
+        # /api/tts are proxied by that same nginx listener.
+        "www" = {
+          enable = true;
+          proxyPass = "http://127.0.0.1:5172";
         };
       };
     };
