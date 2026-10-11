@@ -216,6 +216,22 @@
           enable = true;
           proxyPass = "http://127.0.0.1:5173";
         };
+        # Dashboards from paulgsc/server's compose files, each published on
+        # 127.0.0.1 only.  Grafana and Metabase are told these addresses
+        # (GF_SERVER_ROOT_URL, MB_SITE_URL) for their links and redirects.
+        "grafana" = {
+          enable = true;
+          proxyPass = "http://127.0.0.1:3001";
+        };
+        "metabase" = {
+          enable = true;
+          proxyPass = "http://127.0.0.1:3030";
+        };
+        # No login of its own: anyone on the LAN can browse Redis here.
+        "redisinsight" = {
+          enable = true;
+          proxyPass = "http://127.0.0.1:5540";
+        };
       };
     };
   };
