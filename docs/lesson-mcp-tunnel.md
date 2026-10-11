@@ -28,10 +28,11 @@ address.
 | `POST /api/v1/oauth/token` | the AI service, for a code or a refresh |
 | `POST /api/v1/mcp` | the AI service, with a token |
 
-The approval page (`https://nixos.local:5173/connect`) and the routes it calls
+The approval page (`https://www.home.maishatu.com/connect`, served on the LAN
+by this box's Caddy, docs/lan-tls.md) and the routes it calls
 (`/api/v1/oauth/authorize/requests/*`, `/api/v1/oauth/grants`) do not cross.
-Your passkeys are bound to `nixos.local`, so you approve each service once,
-from home.
+`*.home.maishatu.com` resolves to a private address, and your passkeys are
+bound to `home.maishatu.com`, so you approve each service once, from home.
 
 The paths are compared exactly as sent: case matters, and no wildcards or
 dot-segment cleaning apply. Caddy's own `path` matcher cleans a path before it
@@ -140,7 +141,7 @@ Two further points:
    ```sh
    OAUTH_ISSUER="https://nixos.<tailnet>.ts.net"
    OAUTH_RESOURCE="https://nixos.<tailnet>.ts.net/api/v1/mcp"
-   OAUTH_AUTHORIZE_URL="https://nixos.local:5173/connect"
+   OAUTH_AUTHORIZE_URL="https://www.home.maishatu.com/connect"
    # The prompt get_lesson_prompt hands out: the host path is mounted into the
    # container, and file_host reads it at the container path.
    MCP_LESSON_PROMPT_HOST_FILE="<your some-ui checkout>/packages/ui/topik/src/lib/topik/generation/lesson-prompt.md"
@@ -167,9 +168,10 @@ curl -so /dev/null -w '%{http_code}\n' https://nixos.<tailnet>.ts.net/api/v1/oau
 
 ## Not here
 
-- **Frame-busting for `/connect`.** The page is served by some-ui's `vite dev`
-  on port 5173, not by this Caddy, so its `frame-ancestors` header is set in
-  `apps/www/vite.config.ts`.
+- **Frame-busting for `/connect`.** This Caddy only proxies the page: its
+  `frame-ancestors` header is set by the app behind it (some-ui's
+  `apps/www/nginx.security-headers.conf` for www, `apps/www/vite.config.ts`
+  for dev).
 - **Reaching the box from your other devices over the tailnet.** LM6 keeps
   that closed. Opening a port to them is a firewall rule on `tailscale0`
   added on purpose, not a side effect of joining.
