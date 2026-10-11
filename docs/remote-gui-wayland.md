@@ -30,12 +30,10 @@ completely indifferent to this change.
 
 | Consumer | Where it's configured | Really X11? | Disposition |
 | --- | --- | --- | --- |
-| Storybook (`some-ui`) | `.bashrc` autostarts `pnpm storybook`; port 6006 in `nixos/port-configuration` | No — HTTP, binds `0.0.0.0`, `allowedHosts: nixos.local` | Web-forwarded, unaffected |
 | Vite previews | same project | No — HTTP | Web-forwarded, unaffected |
 | `tinymist` typst preview | `pkgs/vim/typst.vim` (sourced from `pkgs/vim/default.nix`) → `--data-plane-host nixos.local:3141`, browsed at `nixos.local:3141`; port 3141 registered | No — HTTP over mDNS | Web-forwarded, unaffected |
-| Grafana / Prometheus / Redis admin / Metabase | `nixos/port-configuration` | No — HTTP | Web-forwarded, unaffected (Prometheus is box-only since the port pinning in [#7](https://github.com/paulgsc/dotfiles/issues/7); reach it with `ssh -L`) |
+| Grafana / Prometheus / Redis admin / Metabase | `nixos/port-configuration` | No — HTTP | Web-forwarded, unaffected (since [#7](https://github.com/paulgsc/dotfiles/issues/7): Grafana, Metabase and RedisInsight are HTTPS through Caddy at `*.home.maishatu.com`; Prometheus is box-only, reached with `ssh -L`) |
 | Clipboard (tmux yank, vim `"+y`, CLI pipes) | `home-manager/shell/{tmux,clipboard}`, `pkgs/vim` | Not since #15 — OSC52 over the ssh TTY | Already migrated |
-| OBS audio capture | `obs/`, NATS to `nixos.local:4222` | No — runs client-side on Windows/WSL | Unaffected by this epic. Since the port pinning in [#7](https://github.com/paulgsc/dotfiles/issues/7), NATS is box-only, so the script no longer connects (OBS audio is not in use) |
 | GNOME desktop, Firefox | `nixos/configuration.nix` (`services.xserver`, GDM, autologin `paulg`) | Local seat-0 session, never forwarded | Out of scope — see note below |
 | **Headed Playwright E2E** | `some-ui` fixtures probe `$DISPLAY`/`$WAYLAND_DISPLAY`, else `--headless=new` | **This was the one real dependency** | Replaced — see S3 |
 | `xorg.xauth`, `xorg.xhost` | `nixos/ssh-x11` (now `nixos/remote-gui`) | Existed only to serve forwarding | **Deleted** |
@@ -209,8 +207,7 @@ after reconnecting. Full step-by-step walkthrough:
       a fresh connection; `ssh -Y nixos.local echo hi` still connects but
       leaves `$DISPLAY` unset (sshd is refusing the channel, not the login).
 - [ ] **(b) `xauth`/`xhost` are gone** — `command -v xauth xhost` finds nothing.
-- [ ] **(c) Storybook** — reconnect, let `.bashrc` start it, browse
-      `http://nixos.local:6006` from Windows.
+- [ ] **(c) Storybook** — retired (paulgsc/some-ui#1694); nothing to check.
 - [ ] **(d) tinymist preview** — open a `.typ` in the managed vim, trigger the
       preview, browse `http://nixos.local:3141` from Windows.
 - [ ] **(e) Clipboard still works** — re-run the

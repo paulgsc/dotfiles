@@ -7,9 +7,11 @@ _: {
   # needs one:
   #
   #   * clipboard  -> OSC52 over the plain ssh TTY (WAYLANDIA-CLIP #15)
-  #   * Storybook / Vite / tinymist / Grafana / RedisInsight / Metabase
-  #                -> HTTP on the LAN via nixos.local, browsed from Windows
-  #   * Prometheus -> box-only since the port pinning (#7); `ssh -L 9090:…`
+  #   * Vite / Grafana / Metabase / RedisInsight
+  #                -> HTTPS on the LAN as *.home.maishatu.com (Caddy,
+  #                   nixos/subdomains), browsed from Windows
+  #   * tinymist   -> HTTP on the LAN via nixos.local:3141
+  #   * Prometheus -> box only, through an ssh tunnel
   #   * true GUI apps -> the box runs its own GNOME session on seat 0
   #   * headed browser tests -> `headed-run` (a headless Wayland compositor,
   #                             home-manager/shell/headed-test, #25)

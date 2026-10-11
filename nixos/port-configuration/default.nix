@@ -1,7 +1,8 @@
 _: {
-  # Every port this box serves, and who may reach it.  Verified against the
-  # box with `ss -tlnp` on 2026-10-09, after paulgsc/server#416 and
-  # paulgsc/some-ui#1703 were deployed.
+  # Every port this box serves, and who may reach it.  Matches the compose
+  # files on paulgsc/server and paulgsc/some-ui main as of 2026-10-11
+  # (server#416 and #419, some-ui#1703 and #1735) and the Caddy hosts in
+  # nixos/subdomains (#53).
   #
   # Two kinds of port, governed by different things (see nixos/ports for why):
   #
@@ -14,6 +15,10 @@ _: {
   #     Box-only and no-host-port ports use `interfaces = ["lo"]`, which
   #     generates no firewall rule and files them under "Loopback-Only" in
   #     /etc/port-audit.txt.
+  #
+  # The browser-facing apps reach the LAN through Caddy on 443 as
+  # *.home.maishatu.com (nixos/subdomains, docs/lan-tls.md), not on their
+  # own ports.
   networking.managedPorts = {
     enable = true;
 
@@ -29,7 +34,7 @@ _: {
 
     ports = [
       # ═══════════════════════════════════════════════════════════
-      # Host processes (nixos-fw governs these)
+      # Host processes on the LAN (nixos-fw governs these)
       # ═══════════════════════════════════════════════════════════
       {
         port = 22;
@@ -44,39 +49,20 @@ _: {
         port = 80;
         protocol = "tcp";
         service = "caddy";
-        description = "HTTP: Caddy reverse proxy for *.nixos.local subdomains (nixos/subdomains, a NixOS service, not Docker)";
+        description = "HTTP: Caddy (a NixOS service, nixos/subdomains), redirects to HTTPS";
         externalAccess = false;
         srcSubnets = ["10.0.0.0/24"]; # LAN access (phone/tablet)
-        lastUsed = "2026-10-09";
+        lastUsed = "2026-10-11";
       }
 
       {
         port = 443;
         protocol = "tcp";
         service = "caddy";
-        description = "HTTPS: Caddy reverse proxy for *.nixos.local subdomains (nixos/subdomains, a NixOS service, not Docker)";
+        description = "HTTPS: Caddy (a NixOS service, nixos/subdomains) serving *.home.maishatu.com with a Let's Encrypt wildcard: file-host, www, dev, grafana, metabase, redisinsight";
         externalAccess = false;
         srcSubnets = ["10.0.0.0/24"];
-        lastUsed = "2026-10-09";
-      }
-
-      {
-        port = 5173;
-        protocol = "tcp";
-        service = "vite-www";
-        description = "some-ui www Vite dev server (binds 0.0.0.0, strictPort). When the Docker www runs instead it publishes its HTTPS listener here, compose 0.0.0.0 (some-ui#1703), which this rule does not govern.";
-        externalAccess = false;
-        srcSubnets = ["10.0.0.0/24"];
-        lastUsed = "2026-10-09";
-      }
-
-      {
-        port = 6006;
-        protocol = "tcp";
-        service = "storybook";
-        description = "Storybook component dev (browser-accessed from LAN via nixos.local)";
-        externalAccess = false;
-        srcSubnets = ["10.0.0.0/24"]; # headless box; browsed from Windows PC over mDNS
+        lastUsed = "2026-10-11";
       }
 
       {
@@ -89,81 +75,93 @@ _: {
       }
 
       # ═══════════════════════════════════════════════════════════
+      # Host process, box only
+      # ═══════════════════════════════════════════════════════════
+      {
+        port = 5173;
+        protocol = "tcp";
+        service = "vite-www";
+        description = "some-ui www Vite dev server, bound 127.0.0.1 (some-ui#1735); the LAN reaches it through Caddy as dev.home.maishatu.com";
+        externalAccess = false;
+        interfaces = ["lo"];
+        lastUsed = "2026-10-11";
+      }
+
+      # ═══════════════════════════════════════════════════════════
       # Docker, LAN: compose publishes on 0.0.0.0 (IPv4 only)
-      # Reached from the Windows PC or the phone.  srcSubnets below
-      # does NOT restrict these; the compose host IP is the policy.
+      # srcSubnets does NOT restrict it; the compose host IP is the policy.
       # ═══════════════════════════════════════════════════════════
       {
         port = 3000;
         protocol = "tcp";
         service = "file-host";
-        description = "Axum file host (server#416: compose 0.0.0.0; the phone reaches it, and it has its own auth). srcSubnets covers the `cargo run -p file_host` case, a host process.";
+        description = "Axum file host (server#416: compose 0.0.0.0; the phone reaches it directly, and it has its own auth). Caddy also serves it as file-host.home.maishatu.com via 127.0.0.1:3000. srcSubnets covers the `cargo run -p file_host` case, a host process.";
         externalAccess = false;
         srcSubnets = ["10.0.0.0/24"];
         owner = "docker";
-        lastUsed = "2026-10-09";
+        lastUsed = "2026-10-11";
       }
 
+      # ═══════════════════════════════════════════════════════════
+      # Docker, box only: compose publishes on 127.0.0.1
+      # Behind Caddy where a browser needs them; otherwise tunnel:
+      #   ssh -L <port>:localhost:<port> paulg@nixos.local
+      # ═══════════════════════════════════════════════════════════
       {
         port = 3001;
         protocol = "tcp";
         service = "grafana";
-        description = "Grafana dashboards (server#416: compose 0.0.0.0; browsed from Windows at nixos.local:3001)";
+        description = "Grafana (server#419: compose 127.0.0.1); the LAN reaches it as grafana.home.maishatu.com through Caddy";
         externalAccess = false;
-        srcSubnets = ["10.0.0.0/24"];
+        interfaces = ["lo"];
         owner = "docker";
-        lastUsed = "2026-10-09";
+        lastUsed = "2026-10-11";
       }
 
       {
         port = 3030;
         protocol = "tcp";
         service = "metabase";
-        description = "Metabase (server#416: compose 0.0.0.0; browsed from Windows at nixos.local:3030)";
+        description = "Metabase (server#419: compose 127.0.0.1); the LAN reaches it as metabase.home.maishatu.com through Caddy";
         externalAccess = false;
-        srcSubnets = ["10.0.0.0/24"];
+        interfaces = ["lo"];
         owner = "docker";
-        lastUsed = "2026-10-09";
+        lastUsed = "2026-10-11";
       }
 
       {
         port = 5540;
         protocol = "tcp";
         service = "redisinsight";
-        description = "Redis admin UI, no login (server#416: compose 0.0.0.0; browsed from Windows at nixos.local:5540)";
+        description = "Redis admin UI, no login (server#419: compose 127.0.0.1); the LAN reaches it as redisinsight.home.maishatu.com through Caddy";
         externalAccess = false;
-        srcSubnets = ["10.0.0.0/24"];
+        interfaces = ["lo"];
         owner = "docker";
-        lastUsed = "2026-10-09";
-      }
-
-      {
-        port = 5050;
-        protocol = "tcp";
-        service = "openai-edge-tts-proxy";
-        description = "OpenAI Edge TTS proxy, nginx -> python backend (some-ui#1703: compose 0.0.0.0; plain-HTTP pages reach it)";
-        externalAccess = false;
-        srcSubnets = ["10.0.0.0/24"];
-        owner = "docker";
-        lastUsed = "2026-10-09";
+        lastUsed = "2026-10-11";
       }
 
       {
         port = 5172;
         protocol = "tcp";
         service = "www";
-        description = "Docker www HTTP listener (some-ui#1703: compose 0.0.0.0). Its HTTPS listener shares 5173 with vite dev, above.";
+        description = "Docker www nginx, plain HTTP (some-ui#1735: compose 127.0.0.1); the LAN reaches it as www.home.maishatu.com through Caddy";
         externalAccess = false;
-        srcSubnets = ["10.0.0.0/24"];
+        interfaces = ["lo"];
         owner = "docker";
-        lastUsed = "2026-10-09";
+        lastUsed = "2026-10-11";
       }
 
-      # ═══════════════════════════════════════════════════════════
-      # Docker, box only: compose publishes on 127.0.0.1
-      # No auth on any of these.  From Windows, tunnel:
-      #   ssh -L <port>:localhost:<port> paulg@nixos.local
-      # ═══════════════════════════════════════════════════════════
+      {
+        port = 5050;
+        protocol = "tcp";
+        service = "openai-edge-tts-proxy";
+        description = "OpenAI Edge TTS proxy, nginx -> python backend (some-ui#1735: compose 127.0.0.1). Pages reach it through www's /api/tts/ route.";
+        externalAccess = false;
+        interfaces = ["lo"];
+        owner = "docker";
+        lastUsed = "2026-10-11";
+      }
+
       {
         port = 6379;
         protocol = "tcp";
@@ -172,18 +170,18 @@ _: {
         externalAccess = false;
         interfaces = ["lo"];
         owner = "docker";
-        lastUsed = "2026-10-09";
+        lastUsed = "2026-10-11";
       }
 
       {
         port = 4222;
         protocol = "tcp";
         service = "nats";
-        description = "NATS client pub/sub, no auth (server#416: compose 127.0.0.1). obs/scripts/nats_audio_sender.py on Windows can no longer reach it, by choice.";
+        description = "NATS client pub/sub, no auth (server#416: compose 127.0.0.1)";
         externalAccess = false;
         interfaces = ["lo"];
         owner = "docker";
-        lastUsed = "2026-10-09";
+        lastUsed = "2026-10-11";
       }
 
       {
@@ -194,7 +192,7 @@ _: {
         externalAccess = false;
         interfaces = ["lo"];
         owner = "docker";
-        lastUsed = "2026-10-09";
+        lastUsed = "2026-10-11";
       }
 
       {
@@ -205,7 +203,7 @@ _: {
         externalAccess = false;
         interfaces = ["lo"];
         owner = "docker";
-        lastUsed = "2026-10-09";
+        lastUsed = "2026-10-11";
       }
 
       {
@@ -216,7 +214,7 @@ _: {
         externalAccess = false;
         interfaces = ["lo"];
         owner = "docker";
-        lastUsed = "2026-10-09";
+        lastUsed = "2026-10-11";
       }
 
       # ═══════════════════════════════════════════════════════════
@@ -235,7 +233,7 @@ _: {
         externalAccess = false;
         interfaces = ["lo"];
         owner = "docker";
-        lastUsed = "2026-10-09";
+        lastUsed = "2026-10-11";
       }
 
       {
@@ -246,7 +244,7 @@ _: {
         externalAccess = false;
         interfaces = ["lo"];
         owner = "docker";
-        lastUsed = "2026-10-09";
+        lastUsed = "2026-10-11";
       }
 
       {
@@ -257,7 +255,7 @@ _: {
         externalAccess = false;
         interfaces = ["lo"];
         owner = "docker";
-        lastUsed = "2026-10-09";
+        lastUsed = "2026-10-11";
       }
 
       {
@@ -268,7 +266,7 @@ _: {
         externalAccess = false;
         interfaces = ["lo"];
         owner = "docker";
-        lastUsed = "2026-10-09";
+        lastUsed = "2026-10-11";
       }
 
       {
@@ -279,7 +277,7 @@ _: {
         externalAccess = false;
         interfaces = ["lo"];
         owner = "docker";
-        lastUsed = "2026-10-09";
+        lastUsed = "2026-10-11";
       }
 
       {
@@ -290,13 +288,13 @@ _: {
         externalAccess = false;
         interfaces = ["lo"];
         owner = "docker";
-        lastUsed = "2026-10-09";
+        lastUsed = "2026-10-11";
       }
 
       # ═══════════════════════════════════════════════════════════
       # Docker, no host port: log aggregation, NOT YET DEPLOYED
       # These arrive with paulgsc/server#340, which is still an open
-      # PR (not on server main as of 2026-10-09).  Listed ahead of time
+      # PR (not on server main as of 2026-10-11).  Listed ahead of time
       # because each must stay off the host network when it lands.
       # ═══════════════════════════════════════════════════════════
       {
