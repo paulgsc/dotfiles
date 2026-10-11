@@ -210,6 +210,12 @@
           enable = true;
           proxyPass = "http://127.0.0.1:5172";
         };
+        # `vite dev` for apps/www, bound to 127.0.0.1:5173 (its
+        # allowedHosts names this host).  Caddy carries the HMR websocket too.
+        "dev" = {
+          enable = true;
+          proxyPass = "http://127.0.0.1:5173";
+        };
       };
     };
   };

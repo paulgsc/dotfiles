@@ -76,15 +76,6 @@ _: {
       # Development Servers
       # ═══════════════════════════════════════════════════════════
       {
-        port = 5173;
-        protocol = "tcp";
-        service = "vite-www";
-        description = "WWW project Vite dev server";
-        externalAccess = false;
-        srcSubnets = ["10.0.0.0/24"]; # Docker binds 0.0.0.0:5173
-      }
-
-      {
         port = 6006;
         protocol = "tcp";
         service = "storybook";
