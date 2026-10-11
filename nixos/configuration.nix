@@ -198,7 +198,7 @@
       hosts = {
         # A DNS label (no underscore), so a public certificate can name it.
         # Caddy runs on the host, where the container name "file_host" does
-        # not resolve; the container publishes 3000 on the host instead.
+        # not resolve; the container publishes 3000 on the host's loopback.
         "file-host" = {
           enable = true;
           proxyPass = "http://127.0.0.1:3000";
