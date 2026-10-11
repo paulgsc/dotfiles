@@ -20,6 +20,7 @@
     ./port-configuration
     ./subdomains
     ./secrets
+    ./lesson-mcp
   ];
 
   nixpkgs = {
@@ -234,6 +235,11 @@
         };
       };
     };
+
+    # The public half of file_host's MCP endpoint, through Tailscale Funnel.
+    # Off until the tailnet allows Funnel: docs/lesson-mcp-tunnel.md sets that
+    # up and says what to put in paulgsc/server's .env.
+    lessonMcp.enable = false;
   };
 
   # Enable touchpad support (enabled default in most desktopManager).
