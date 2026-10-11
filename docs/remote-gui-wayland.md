@@ -30,7 +30,6 @@ completely indifferent to this change.
 
 | Consumer | Where it's configured | Really X11? | Disposition |
 | --- | --- | --- | --- |
-| Storybook (`some-ui`) | `.bashrc` autostarts `pnpm storybook`; port 6006 in `nixos/port-configuration` | No — HTTP, binds `0.0.0.0`, `allowedHosts: nixos.local` | Web-forwarded, unaffected |
 | Vite previews | same project | No — HTTP | Web-forwarded, unaffected |
 | `tinymist` typst preview | `pkgs/vim/typst.vim` (sourced from `pkgs/vim/default.nix`) → `--data-plane-host nixos.local:3141`, browsed at `nixos.local:3141`; port 3141 registered | No — HTTP over mDNS | Web-forwarded, unaffected |
 | Grafana / Prometheus / Redis admin / Metabase | `nixos/port-configuration` | No — HTTP | Web-forwarded, unaffected |
@@ -208,8 +207,7 @@ after reconnecting. Full step-by-step walkthrough:
       a fresh connection; `ssh -Y nixos.local echo hi` still connects but
       leaves `$DISPLAY` unset (sshd is refusing the channel, not the login).
 - [ ] **(b) `xauth`/`xhost` are gone** — `command -v xauth xhost` finds nothing.
-- [ ] **(c) Storybook** — reconnect, let `.bashrc` start it, browse
-      `http://nixos.local:6006` from Windows.
+- [ ] **(c) Storybook** — retired (paulgsc/some-ui#1694); nothing to check.
 - [ ] **(d) tinymist preview** — open a `.typ` in the managed vim, trigger the
       preview, browse `http://nixos.local:3141` from Windows.
 - [ ] **(e) Clipboard still works** — re-run the
