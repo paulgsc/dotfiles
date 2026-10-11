@@ -60,6 +60,7 @@ nix shell nixpkgs#sops nixpkgs#age nixpkgs#ssh-to-age
 4. **Create the secrets file:**
 
    ```sh
+   mkdir -p secrets             # sops creates the file, not the folder
    sops secrets/nixos.yaml      # opens $EDITOR on a plaintext view
    ```
 
