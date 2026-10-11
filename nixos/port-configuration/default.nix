@@ -56,9 +56,9 @@ _: {
         port = 3000;
         protocol = "tcp";
         service = "file-host";
-        description = "Axum file host server";
+        description = "file_host (paulgsc/server), published on 127.0.0.1 only: the LAN reaches it through Caddy as file-host.home.maishatu.com";
         externalAccess = false;
-        srcSubnets = ["10.0.0.0/24"]; # Docker binds 0.0.0.0:3000
+        interfaces = ["lo"];
         owner = "docker";
       }
 
