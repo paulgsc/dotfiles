@@ -9,8 +9,8 @@
 # The placeholders below are deliberately not valid keys, so sops refuses to
 # encrypt anything until the bootstrap in docs/secrets.md has filled them.
 keys:
-  - &admin age1REPLACE_WITH_YOUR_ADMIN_PUBLIC_KEY
-  - &nixos age1REPLACE_WITH_THE_NIXOS_HOST_KEY
+  - &admin age1jj0m6zk3832ewsgtu59pzzhskme23yw0tuddjpn7u9nmqtqr3fyqr2gkna
+  - &nixos age1sw59jghnkj57nc7xe4lwhryd0evrwqgrekxac9pf80xxdp9eesks2ykmam
 creation_rules:
   - path_regex: secrets/nixos\.yaml$
     key_groups:
