@@ -32,7 +32,7 @@ completely indifferent to this change.
 | --- | --- | --- | --- |
 | Vite previews | same project | No — HTTP | Web-forwarded, unaffected |
 | `tinymist` typst preview | `pkgs/vim/typst.vim` (sourced from `pkgs/vim/default.nix`) → `--data-plane-host nixos.local:3141`, browsed at `nixos.local:3141`; port 3141 registered | No — HTTP over mDNS | Web-forwarded, unaffected |
-| Grafana / Prometheus / Redis admin / Metabase | `nixos/port-configuration` | No — HTTP | Web-forwarded, unaffected |
+| Grafana / Prometheus / Redis admin / Metabase | `nixos/port-configuration` | No — HTTP | Web-forwarded, unaffected (since [#7](https://github.com/paulgsc/dotfiles/issues/7): Grafana, Metabase and RedisInsight are HTTPS through Caddy at `*.home.maishatu.com`; Prometheus is box-only, reached with `ssh -L`) |
 | Clipboard (tmux yank, vim `"+y`, CLI pipes) | `home-manager/shell/{tmux,clipboard}`, `pkgs/vim` | Not since #15 — OSC52 over the ssh TTY | Already migrated |
 | GNOME desktop, Firefox | `nixos/configuration.nix` (`services.xserver`, GDM, autologin `paulg`) | Local seat-0 session, never forwarded | Out of scope — see note below |
 | **Headed Playwright E2E** | `some-ui` fixtures probe `$DISPLAY`/`$WAYLAND_DISPLAY`, else `--headless=new` | **This was the one real dependency** | Replaced — see S3 |

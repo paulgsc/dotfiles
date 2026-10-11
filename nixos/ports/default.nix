@@ -1,3 +1,17 @@
+# networking.managedPorts: the box's port inventory, its nixos-fw rules, and
+# /etc/port-audit.txt.
+#
+# What this module governs, and what it cannot:
+#
+#   * HOST PROCESSES (sshd, Caddy, vite, storybook, tinymist): their traffic
+#     passes nixos-fw's INPUT chain, so `srcSubnets` and `interfaces` here are
+#     the access policy.
+#   * DOCKER-PUBLISHED PORTS: Docker DNATs them in its own iptables chains
+#     before INPUT, so no rule this module generates ever sees the packet.
+#     Their policy is the host IP in the compose `ports:` entry, and for a
+#     port published with none, dockerd's default (`daemon.settings.ip` in
+#     nixos/configuration.nix; default bridge only).  They are still listed
+#     here so the inventory and the audit report are complete.
 {
   config,
   lib,
@@ -154,6 +168,12 @@ with lib; let
     cfg.portRanges)
   );
 
+  # Ports other NixOS modules open themselves (openssh's and avahi's
+  # openFirewall, for example).  They bypass this inventory's scoping, so the
+  # audit report lists them rather than let "Globally Open" read as empty.
+  otherTcpPorts = subtractLists tcpPorts config.networking.firewall.allowedTCPPorts;
+  otherUdpPorts = subtractLists udpPorts config.networking.firewall.allowedUDPPorts;
+
   portProtos = p:
     if p.protocol == "both"
     then ["tcp" "udp"]
@@ -204,7 +224,11 @@ with lib; let
         '')
         globalPorts}
 
-      ## LAN-Scoped Ports (iptables -s <subnet> — NOT in allowedTCPPorts)
+      ## Opened by Other NixOS Modules (allowedTCPPorts/allowedUDPPorts — all interfaces, not scoped here)
+      ${concatMapStringsSep "\n" (p: "- ${toString p}/tcp") otherTcpPorts}
+      ${concatMapStringsSep "\n" (p: "- ${toString p}/udp") otherUdpPorts}
+
+      ## LAN-Scoped Ports (iptables -s <subnet> — NOT in allowedTCPPorts; host processes only)
       ${concatMapStringsSep "\n" (p: ''
           - ${toString p.port}/${p.protocol}  ${p.service}: ${p.description}
             Allowed from: ${concatStringsSep ", " p.srcSubnets} | Owner: ${p.owner} | Last Used: ${p.lastUsed}
@@ -230,6 +254,8 @@ with lib; let
         then "WARNING: some ports marked externalAccess = true"
         else "OK: no ports marked for external access"
       }
+      NOTE: nixos-fw rules govern host processes only. Docker-published ports bypass them;
+      their policy is the compose `ports:` host IP (check with: ss -tlnp | grep -v 127.0.0.1).
       NOTE: autoRetire is not enforced at build time (Nix eval is pure; no wall-clock access).
       Manually review ports with lastUsed older than ${toString cfg.autoRetire.daysUntilRetirement} days.
       After rebuild, verify scoping: sudo nft list ruleset | grep -A2 'nixos-fw'
