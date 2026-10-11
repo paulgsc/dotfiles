@@ -35,7 +35,6 @@ completely indifferent to this change.
 | `tinymist` typst preview | `pkgs/vim/typst.vim` (sourced from `pkgs/vim/default.nix`) → `--data-plane-host nixos.local:3141`, browsed at `nixos.local:3141`; port 3141 registered | No — HTTP over mDNS | Web-forwarded, unaffected |
 | Grafana / Prometheus / Redis admin / Metabase | `nixos/port-configuration` | No — HTTP | Web-forwarded, unaffected |
 | Clipboard (tmux yank, vim `"+y`, CLI pipes) | `home-manager/shell/{tmux,clipboard}`, `pkgs/vim` | Not since #15 — OSC52 over the ssh TTY | Already migrated |
-| OBS audio capture | `obs/`, NATS to `nixos.local:4222` | No — runs client-side on Windows/WSL | Unaffected |
 | GNOME desktop, Firefox | `nixos/configuration.nix` (`services.xserver`, GDM, autologin `paulg`) | Local seat-0 session, never forwarded | Out of scope — see note below |
 | **Headed Playwright E2E** | `some-ui` fixtures probe `$DISPLAY`/`$WAYLAND_DISPLAY`, else `--headless=new` | **This was the one real dependency** | Replaced — see S3 |
 | `xorg.xauth`, `xorg.xhost` | `nixos/ssh-x11` (now `nixos/remote-gui`) | Existed only to serve forwarding | **Deleted** |

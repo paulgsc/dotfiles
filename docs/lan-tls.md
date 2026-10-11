@@ -192,6 +192,17 @@ those devices still trust anything that CA signs:
 `mkcert` itself can stay installed for `localhost`-only development. It just stops being
 how other devices reach this machine.
 
+## What still uses nixos.local
+
+Every HTTP service on this machine is either `http://localhost` or
+`https://<name>.home.maishatu.com`, with two deliberate exceptions, both over
+mDNS (Avahi, UDP 5353):
+
+- **The typst preview**, `http://nixos.local:3141` (`pkgs/vim/typst.vim`).
+  tinymist checks the browser's `Origin` against the host it binds, so moving it
+  behind Caddy needs header rewriting; left as it is.
+- **SSH**, `ssh paulg@nixos.local`. SSH trusts host keys, not certificates.
+
 ## What this exposes
 
 - **New ports: none.** Caddy's 443 and 80 were already open to the LAN, and the
