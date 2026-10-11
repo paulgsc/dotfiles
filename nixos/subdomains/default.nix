@@ -168,12 +168,14 @@ in {
     # Caddy's own module adds group = "caddy" and reloadServices = caddy for
     # a cert a vhost names in useACMEHost, so renewals reach it unattended.
     (mkIf cfg.tls.enable {
-      # The one certificate is *.baseDomain; a host on another domain would
-      # be served a certificate that does not name it.
+      # The one certificate is *.baseDomain, which names exactly one label
+      # under baseDomain: a host on another domain, or a name with a dot or
+      # an underscore in it, would be served a certificate that does not
+      # name it.
       assertions = [
         {
-          assertion = all (h: h.domain == null) (attrValues cfg.hosts);
-          message = "services.subdomains.hosts.<name>.domain cannot be set while tls is enabled: the certificate covers only *.${cfg.baseDomain}.";
+          assertion = all (name: builtins.match "[a-z0-9]([a-z0-9-]*[a-z0-9])?" name != null && cfg.hosts.${name}.domain == null) (attrNames cfg.hosts);
+          message = "services.subdomains.hosts: with tls enabled every host name must be one DNS label (lowercase letters, digits, inner hyphens) and no host may set `domain`: the certificate covers only *.${cfg.baseDomain}.";
         }
       ];
 
