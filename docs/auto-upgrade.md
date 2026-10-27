@@ -50,7 +50,7 @@ is labelled `upgrade-log`.
   fingerprint doesn't match that run gets closed with a comment. The issue was either
   fixed or replaced by a newer issue holding what's left. A failed run closes nothing.
 
-### Turn it on
+### Token setup
 
 1. Create a fine-grained GitHub token: repository `paulgsc/dotfiles` only, permission
    **Issues: Read and write**, nothing else.
@@ -60,7 +60,8 @@ is labelled `upgrade-log`.
    nix shell nixpkgs#sops -c sops secrets/nixos.yaml
    ```
 
-3. Set `reportToGitHub = true;` in `nixos/auto-upgrade/default.nix` and merge.
+3. Set `reportToGitHub = true;` in `nixos/auto-upgrade/default.nix` and merge. (It is on for
+   this machine.) The script creates the `upgrade-log` label the first time it files.
 
 The toggle exists because sops-nix fails the build when a declared secret is missing from
 `secrets/nixos.yaml`. With the toggle off, nothing is declared and reports stay local.

@@ -144,6 +144,10 @@ if [ "$failed" = true ]; then
 else
   title="Nightly upgrade warnings on $host ($(printf '%s\n' "$findings" | wc -l) lines)"
 fi
+# The label has to exist before an issue can carry it; 422 means it does.
+api -X POST "https://api.github.com/repos/$REPO/labels" \
+  -d "$(jq -n --arg l "$label" '{name: $l, color: "d93f0b", description: "Warnings/errors from the nightly upgrade (nixos/auto-upgrade)"}')" \
+  >/dev/null 2>&1 || true
 api -X POST "https://api.github.com/repos/$REPO/issues" \
   -d "$(jq -n --arg t "$title" --rawfile b "$STATE_DIR/latest.md" --arg l "$label" '{title: $t, body: $b[:60000], labels: [$l]}')" |
   jq -r '"opened #\(.number) \(.html_url)"'

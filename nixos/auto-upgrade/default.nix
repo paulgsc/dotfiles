@@ -22,11 +22,12 @@
   flakeRef = "github:${repo}";
   user = "paulg";
 
-  # docs/auto-upgrade.md: flip once secrets/nixos.yaml holds
-  # `github-issues-token` (fine-grained, Issues: read/write on this repo
-  # only).  A declared secret the file doesn't hold fails the build, so this
-  # stays false until then; the report still lands in latest.md.
-  reportToGitHub = false;
+  # File reports as GitHub issues, with `github-issues-token` from
+  # secrets/nixos.yaml (fine-grained, Issues: read/write on this repo only).
+  # A declared secret the file doesn't hold fails the build, so on a machine
+  # without one set this false; the report still lands in latest.md.
+  # docs/auto-upgrade.md.
+  reportToGitHub = true;
 
   report = pkgs.writeShellApplication {
     name = "upgrade-report";
