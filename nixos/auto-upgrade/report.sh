@@ -17,23 +17,32 @@ label=upgrade-log
 
 # This run started when nixos-upgrade did; home-manager-upgrade only counts
 # if it ran after that (it doesn't when the system half failed).
-since=$(systemctl show nixos-upgrade -p ExecMainStartTimestamp --value --timestamp=unix)
-if [ -z "$since" ]; then
-  echo "nixos-upgrade has not run yet; nothing to report"
+#
+# Compare the *Monotonic properties: `systemctl show` prints every property
+# named *Timestamp as a formatted date and ignores --timestamp=, while these
+# print as plain microseconds since boot (0 if not run this boot).  The log is
+# then read per invocation ID, so no wall-clock time is involved at all.
+show() { systemctl show "$1" -p "$2" --value; }
+since=$(show nixos-upgrade ExecMainStartTimestampMonotonic)
+if [ "${since:-0}" -eq 0 ]; then
+  echo "nixos-upgrade has not run this boot; nothing to report"
   exit 0
 fi
 
 declare -A result
+log=""
+journal_cmd=""
 for u in "${units[@]}"; do
-  started=$(systemctl show "$u" -p ExecMainStartTimestamp --value --timestamp=unix)
-  if [ -n "$started" ] && [ "${started#@}" -ge "${since#@}" ]; then
-    result[$u]=$(systemctl show "$u" -p Result --value)
+  started=$(show "$u" ExecMainStartTimestampMonotonic)
+  if [ "${started:-0}" -ge "$since" ]; then
+    result[$u]=$(show "$u" Result)
+    invocation=$(show "$u" InvocationID)
+    log+=$(journalctl --no-pager -o cat -u "$u" --invocation="$invocation")$'\n'
+    journal_cmd+="${journal_cmd:+; }journalctl -u $u --invocation=$invocation"
   else
     result[$u]=skipped
   fi
 done
-
-log=$(journalctl --no-pager -o cat --since "$since" -u nixos-upgrade -u home-manager-upgrade)
 
 # The signal: nix/nixos-rebuild/home-manager warnings and errors, and the
 # activation scripts' own WARNING lines.  Build progress, "copying path",
@@ -96,7 +105,7 @@ else
     echo
     echo "- Reproduce without switching: \`nix build .#nixosConfigurations.nixos.config.system.build.toplevel\`"
     echo "  and \`nix build '.#homeConfigurations.\"paulg@nixos\".activationPackage'\` — evaluation warnings print there too."
-    echo "- Full log on the machine: \`journalctl -u nixos-upgrade -u home-manager-upgrade --since '$since'\`."
+    echo "- Full log on the machine: \`$journal_cmd\`."
     echo "- Fix it in a PR to \`main\`; the next successful nightly run without these lines closes this issue."
   } >"$STATE_DIR/latest.md"
   echo "findings written to $STATE_DIR/latest.md (fingerprint $fingerprint)"
