@@ -16,6 +16,7 @@
     ./remote-gui
     ./state-version-guard
     ./bootloader-cleanup
+    ./auto-upgrade
     ./ports
     ./port-configuration
     ./subdomains
