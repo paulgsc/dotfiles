@@ -57,7 +57,13 @@ for u in "${units[@]}"; do
   case ${result[$u]} in success | skipped) ;; *) failed=true ;; esac
 done
 
-rev=$(git ls-remote "https://github.com/$REPO" refs/heads/main 2>/dev/null | cut -c1-12 || true)
+# The commit the running system was built from (flake.nix records it); on a
+# failed switch that is the previous deploy, so fall back to `main`'s tip.
+rev=$(/run/current-system/sw/bin/nixos-version --configuration-revision 2>/dev/null || true)
+if [ "${result[nixos-upgrade]}" != success ] || [ -z "$rev" ]; then
+  rev=$(git ls-remote "https://github.com/$REPO" refs/heads/main 2>/dev/null || true)
+fi
+rev=${rev:0:12}
 host=$(hostname)
 date=$(date -Iseconds)
 

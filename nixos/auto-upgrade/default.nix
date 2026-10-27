@@ -72,7 +72,8 @@ in {
   systemd.services = {
     # Home-manager is standalone here (homeConfigurations, not a NixOS module),
     # so `nixos-rebuild` doesn't touch it.  Chain it on the system upgrade's
-    # success so both halves move to the same `main` in one go.
+    # success, building the commit that system was built from (see the
+    # script below), so both halves land on the same revision.
     nixos-upgrade = {
       onSuccess = ["home-manager-upgrade.service"];
       onFailure = ["upgrade-report.service"];
@@ -95,12 +96,24 @@ in {
         pkgs.coreutils
       ];
 
+      # Pin to the system's commit rather than fetching `main` again: a merge
+      # landing mid-run would otherwise put home on a newer commit than the
+      # system.  Falls back to `main` when the running system doesn't record
+      # one (a local, uncommitted switch).
+      #
       # XDG_RUNTIME_DIR lets sd-switch reach the user's systemd to restart
       # changed user units; with nobody logged in, activation skips that step.
       script = ''
+        ref='${flakeRef}'
+        rev=$(/run/current-system/sw/bin/nixos-version --configuration-revision 2>/dev/null || true)
+        if [[ $rev =~ ^[0-9a-f]{40}$ ]]; then
+          ref="${flakeRef}/$rev"
+        fi
+        echo "home-manager: building $ref"
+
         export XDG_RUNTIME_DIR="/run/user/$(id -u)"
         ${inputs.home-manager.packages.${pkgs.stdenv.hostPlatform.system}.home-manager}/bin/home-manager \
-          switch --refresh --flake '${flakeRef}#${user}@nixos'
+          switch --refresh --flake "$ref#${user}@nixos"
       '';
 
       onSuccess = ["upgrade-report.service"];
