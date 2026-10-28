@@ -60,8 +60,12 @@ for u in "${units[@]}"; do
     ulog=$(journalctl --no-pager -o cat -u "$u" --invocation="$invocation")
     log+="$ulog"$'\n'
     journal_cmd+="${journal_cmd:+; }journalctl -u $u --invocation=$invocation"
-    # The unit printed this first thing (./default.nix, preStart).
-    if ! printf '%s\n' "$ulog" | curate | grep -qxF "warning: upgrade-canary $invocation"; then
+    # The unit printed this first thing (./default.nix, preStart).  Matched
+    # from a variable, not a pipe: `grep -q` stops reading at the first
+    # match, and with pipefail the writer's SIGPIPE would read as "missing"
+    # on a run that printed more than a pipe buffer of warnings.
+    ucurated=$(printf '%s\n' "$ulog" | curate)
+    if ! grep -qxF "warning: upgrade-canary $invocation" <<<"$ucurated"; then
       canary_missing+=("$u")
     fi
   else
@@ -180,7 +184,7 @@ fi
     echo "have been kept, add it to \`nixos/auto-upgrade/filter-fixture.txt\` and fix \`filter.sh\`."
     echo
     echo '```'
-    printf '%s\n' "$misses" | head -n 20
+    head -n 20 <<<"$misses" # not a pipe: an early-exiting head would SIGPIPE printf
     echo '```'
     echo
   fi
@@ -262,7 +266,7 @@ write_metrics() {
       while IFS= read -r line; do
         i=$((i + 1))
         printf 'upgrade_finding_info{n="%02d",text="%s"} 1\n' "$i" "$(esc "$line")"
-      done < <(printf '%s\n' "$findings" | head -n 30)
+      done < <(head -n 30 <<<"$findings")
     fi
     echo "# HELP upgrade_report_info Where the last run's report lives."
     echo "# TYPE upgrade_report_info gauge"

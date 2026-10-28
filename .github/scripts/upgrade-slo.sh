@@ -26,17 +26,23 @@ now=$(date +%s)
 violations=()
 add() { violations+=("$1"); }
 
-# shellcheck disable=SC2016 # $owner/$name are GraphQL variables
-deployments=$(gh api graphql -f owner="${REPO%/*}" -f name="${REPO#*/}" -f query='
-  query($owner: String!, $name: String!) {
+# Every page, newest first: nightly runs plus manual ones can pass 100 in
+# the 90-day window, and a truncated list would read as a shorter history.
+# --paginate runs the --jq per page; `jq -s add` joins the pages' arrays.
+# shellcheck disable=SC2016 # $owner/$name/$endCursor are GraphQL variables
+deployments=$(gh api graphql --paginate -f owner="${REPO%/*}" -f name="${REPO#*/}" -f query='
+  query($owner: String!, $name: String!, $endCursor: String) {
     repository(owner: $owner, name: $name) {
-      deployments(environments: ["nixos"], first: 100, orderBy: {field: CREATED_AT, direction: DESC}) {
+      deployments(environments: ["nixos"], first: 100, after: $endCursor,
+                  orderBy: {field: CREATED_AT, direction: DESC}) {
         nodes { createdAt commitOid payload latestStatus { state } }
+        pageInfo { hasNextPage endCursor }
       }
     }
   }' --jq '.data.repository.deployments.nodes
     | map({ts: (.createdAt | fromdateiso8601), rev: .commitOid,
-           state: (.latestStatus.state // "NONE"), payload: ((.payload // "{}") | fromjson? // {})})')
+           state: (.latestStatus.state // "NONE"), payload: ((.payload // "{}") | fromjson? // {})})' |
+  jq -s 'add // []')
 
 main=$(gh api "repos/$REPO/commits/main" --jq '{sha: .sha, ts: (.commit.committer.date | fromdateiso8601)}')
 main_sha=$(jq -r .sha <<<"$main")
