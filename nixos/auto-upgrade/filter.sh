@@ -16,9 +16,14 @@ keep_re='(^|[[:space:]])(evaluation warning|trace: warning|warning|error)(:|[[:s
 keep_re+='|^WARNING|failed|refusing'
 keep_re+='|is in the way of|would be clobbered|Oops, Nix failed'
 keep_re+='|Please do one of the following|does not link into a Home Manager generation'
+# Shell and process failures that carry no warning/error word (#58: the
+# switch's root cause and its exit line).
+keep_re+='|command not found|non-zero exit status'
 
-# Build progress that names a path or package containing a keyword.
+# Build progress that names a path or package containing a keyword, and
+# systemd starting a unit's OnFailure=/OnSuccess= chain (the reporter itself).
 drop_re='^(building|copying path|these [0-9]+ (paths|derivations))'
+drop_re+='|: Triggering On(Failure|Success)= dependencies'
 
 # Wider than keep_re on purpose: what it catches and curate() doesn't is
 # reported as a near miss, so the filter drifting shows before it misses.
