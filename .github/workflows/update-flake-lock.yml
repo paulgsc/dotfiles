@@ -1,0 +1,131 @@
+name: Update flake.lock
+
+# Weekly `nix flake update`, opened as one PR whose body is the changeset:
+# which inputs moved (with compare links) and which package versions that
+# moves on the machine (nvd diff of the system and home closures).  Merging
+# it is the whole upgrade — nixos/auto-upgrade switches the box to `main`
+# overnight.  See docs/auto-upgrade.md.
+#
+# Needs one repo setting: Settings → Actions → General → Workflow
+# permissions → "Allow GitHub Actions to create and approve pull requests".
+# Without it the create step fails with "GitHub Actions is not permitted to
+# create or approve pull requests".
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # every Monday 06:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: update-flake-lock
+  cancel-in-progress: true
+
+jobs:
+  update:
+    name: weekly lockfile update
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write # to dispatch check.yml on the PR branch (see last step)
+
+    env:
+      SYSTEM: .#nixosConfigurations.nixos.config.system.build.toplevel
+      HOME_CFG: '.#homeConfigurations."paulg@nixos".activationPackage'
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v14
+      - uses: DeterminateSystems/magic-nix-cache-action@v8
+
+      # Closures for what `main` deploys today — the "before" of the diff.
+      - name: build current closures
+        run: |
+          echo "OLD_SYSTEM=$(nix build --no-link --print-out-paths "$SYSTEM")" >> "$GITHUB_ENV"
+          echo "OLD_HOME=$(nix build --no-link --print-out-paths "$HOME_CFG")" >> "$GITHUB_ENV"
+          cp flake.lock "$RUNNER_TEMP/flake.lock.old"
+
+      - name: update flake inputs
+        run: nix flake update
+
+      - name: build updated closures
+        id: build
+        run: |
+          if git diff --quiet -- flake.lock; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "flake.lock unchanged; nothing to propose."
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "NEW_SYSTEM=$(nix build --no-link --print-out-paths "$SYSTEM")" >> "$GITHUB_ENV"
+          echo "NEW_HOME=$(nix build --no-link --print-out-paths "$HOME_CFG")" >> "$GITHUB_ENV"
+
+      - name: write changeset
+        if: steps.build.outputs.changed == 'true'
+        run: |
+          body="$RUNNER_TEMP/body.md"
+          nvd() { nix run nixpkgs#nvd -- --color never "$@"; }
+
+          {
+            echo "Automated weekly \`nix flake update\`. CI has already built both"
+            echo "closures below; merging deploys it — the machine switches system"
+            echo "and home-manager to \`main\` at its next nightly run."
+            echo
+            echo "### Inputs"
+            echo
+            # One line per locked github input whose rev moved, with a compare link.
+            jq -rn --slurpfile old "$RUNNER_TEMP/flake.lock.old" --slurpfile new flake.lock '
+              $new[0].nodes | to_entries[]
+              | select(.value.locked.type? == "github")
+              | .key as $k | .value.locked as $n
+              | ($old[0].nodes[$k].locked // {}) as $o
+              | select($o.rev != $n.rev)
+              | "- **\($k)** `\($n.owner)/\($n.repo)`: "
+                + (if $o.rev then
+                    "[`\($o.rev[:8])…\($n.rev[:8])`](https://github.com/\($n.owner)/\($n.repo)/compare/\($o.rev)...\($n.rev))"
+                    + " (\($o.lastModified | strftime("%Y-%m-%d")) → \($n.lastModified | strftime("%Y-%m-%d")))"
+                   else "new at `\($n.rev[:8])`" end)
+            '
+            echo
+            echo "### System (\`nixos\`)"
+            echo
+            echo '```'
+            nvd diff "$OLD_SYSTEM" "$NEW_SYSTEM"
+            echo '```'
+            echo
+            echo "### Home (\`paulg@nixos\`)"
+            echo
+            echo '```'
+            nvd diff "$OLD_HOME" "$NEW_HOME"
+            echo '```'
+          } > "$body"
+
+          # GitHub caps a PR body at 65536 characters.
+          if [ "$(wc -c < "$body")" -gt 60000 ]; then
+            head -c 60000 "$body" > "$body.cut"
+            printf '\n```\n\n_Truncated; see the workflow run for the full diff._\n' >> "$body.cut"
+            mv "$body.cut" "$body"
+          fi
+          cat "$body" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: open or update PR
+        id: pr
+        if: steps.build.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "chore(flake): weekly lockfile update"
+          title: "chore(flake): weekly lockfile update"
+          body-path: ${{ runner.temp }}/body.md
+          branch: automated/lockfile-update
+          delete-branch: true
+          add-paths: flake.lock
+
+      # Pushes made with GITHUB_TOKEN never trigger `push`/`pull_request`
+      # workflows, so check.yml would never run on this PR by itself.
+      # workflow_dispatch is the documented exception; the run lands on the
+      # PR's head commit, so its checks show on the PR.
+      - name: run checks on the PR
+        if: steps.pr.outputs.pull-request-operation == 'created' || steps.pr.outputs.pull-request-operation == 'updated'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run check.yml --ref automated/lockfile-update

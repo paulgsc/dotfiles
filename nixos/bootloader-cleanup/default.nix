@@ -44,22 +44,6 @@
     };
   };
 
-  # Use NixOS's built-in generation management instead of custom scripts
-  system = {
-    # This controls how many generations are kept in /nix/var/nix/profiles/system
-    # Older generations beyond this limit are automatically eligible for GC
-    autoUpgrade = {
-      enable = false; # Set to true if you want automatic updates
-      dates = "weekly";
-      flags = [
-        "--max-jobs"
-        "2"
-        "--cores"
-        "0"
-      ];
-    };
-  };
-
   # Safe way to monitor and alert on boot partition usage
   # Instead of automatically deleting files
   systemd.services.boot-space-monitor = {

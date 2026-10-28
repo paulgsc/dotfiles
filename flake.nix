@@ -68,6 +68,10 @@
         modules = [
           # > Our main nixos configuration file <
           ./nixos/configuration.nix
+          # The commit this system was built from, for `nixos-version
+          # --configuration-revision`; nixos/auto-upgrade pins the home
+          # upgrade to it.  Null for an uncommitted local build.
+          {system.configurationRevision = self.rev or null;}
         ];
       };
     };
