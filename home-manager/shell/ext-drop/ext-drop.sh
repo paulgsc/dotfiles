@@ -82,9 +82,10 @@ lock() {
 # One lock per checkout and extension, held from the build until its dist/ is
 # copied: the targets of one extension share dist/, so a chromium and a
 # firefox build run at once would otherwise zip each other's output. Keyed by
-# the path, so separate checkouts still build in parallel.
+# the resolved path (realpath, so ./, .. and symlinks to one checkout share
+# a lock), so separate checkouts still build in parallel.
 lock_dist() {
-  exec 8>"${XDG_RUNTIME_DIR:-/tmp}/ext-drop-dist-$(printf '%s' "$1" | md5sum | cut -c1-12).lock"
+  exec 8>"${XDG_RUNTIME_DIR:-/tmp}/ext-drop-dist-$(realpath -- "$1" | md5sum | cut -c1-12).lock"
   flock 8
 }
 
