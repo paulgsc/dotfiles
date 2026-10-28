@@ -79,6 +79,15 @@ lock() {
   flock 9
 }
 
+# One lock per checkout and extension, held from the build until its dist/ is
+# copied: the targets of one extension share dist/, so a chromium and a
+# firefox build run at once would otherwise zip each other's output. Keyed by
+# the path, so separate checkouts still build in parallel.
+lock_dist() {
+  exec 8>"${XDG_RUNTIME_DIR:-/tmp}/ext-drop-dist-$(printf '%s' "$1" | md5sum | cut -c1-12).lock"
+  flock 8
+}
+
 point() {
   local dest=$1 name=$2 target=$3
   ln -sfn "$target" "$dest/.$name.zip"
@@ -117,6 +126,7 @@ cmd_build() {
 
   # A fresh checkout has no workspace dist/, and the extension's build cannot
   # resolve @some-ui/* without it. turbo builds only what this one depends on.
+  lock_dist "$ext_dir"
   echo "ext-drop: building $pkg's dependencies"
   pnpm -C "$repo" exec turbo run build --filter="$pkg^..." --output-logs=errors-only
   echo "ext-drop: pnpm run $script in $ext_dir"
@@ -147,6 +157,7 @@ cmd_build() {
   stage=$(mktemp -d)
   trap '[ -z "$stage" ] || rm -rf "$stage"' EXIT
   cp -r "$ext_dir/dist" "$stage/ext"
+  exec 8>&-
   jq -n --arg ext "$ext" --arg target "$target" --arg commit "$(git -C "$repo" rev-parse HEAD)" \
     --arg branch "$branch" --arg built "$stamp" --argjson dirty "$([ -n "$dirty" ] && echo true || echo false)" \
     '{$ext, $target, $commit, $branch, $dirty, $built}' >"$stage/ext/ext-drop.json"
