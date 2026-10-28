@@ -267,7 +267,7 @@ in {
         type = types.bool;
         default = false;
         description = ''
-          When true, surfaces a reminder in the audit report and a build warning.
+          When true, surfaces a reminder in the audit report and at activation.
           Does NOT filter ports — Nix eval is pure and cannot compare lastUsed
           against the real current date at build time.
         '';
@@ -332,10 +332,13 @@ in {
       ''
     );
 
+    # No build warning for autoRetire: it fired on every build for as long as
+    # the option was on, naming no port, so it could never be acted on and kept
+    # the nightly upgrade's findings permanently non-zero (#60).  The reminder
+    # stays where it can be read against dates: /etc/port-audit.txt and the
+    # activation message above.
     warnings =
-      (optional (any (p: p.externalAccess) cfg.ports)
-        "networking.managedPorts: some ports are marked externalAccess = true. Ensure they are properly secured.")
-      ++ (optional cfg.autoRetire.enable
-        "networking.managedPorts: autoRetire.enable is set but retirement is NOT enforced at build time. Use /etc/port-audit.txt for manual review.");
+      optional (any (p: p.externalAccess) cfg.ports)
+      "networking.managedPorts: some ports are marked externalAccess = true. Ensure they are properly secured.";
   };
 }
