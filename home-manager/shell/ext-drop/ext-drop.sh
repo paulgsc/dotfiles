@@ -140,16 +140,22 @@ cmd_build() {
     --arg branch "$branch" --arg built "$stamp" --argjson dirty "$([ -n "$dirty" ] && echo true || echo false)" \
     '{$ext, $target, $commit, $branch, $dirty, $built}' >"$stage/ext/ext-drop.json"
   (cd "$stage/ext" && zip -qrX "$stage/out.zip" .)
-  # Into a dotfile first, then linked into place: the listing never offers a
-  # half-written zip, and ln (unlike mv) refuses a name that is already taken,
-  # so two builds in the same second at the same commit cannot replace one
-  # another, or the build a pointer names.
-  cp "$stage/out.zip" "$dest/.$name"
-  if ! ln "$dest/.$name" "$dest/$name" 2>/dev/null; then
-    rm -f "$dest/.$name"
+  # Into a dotfile of this run's own first, then linked into place: the listing
+  # never offers a half-written zip, and ln (unlike mv) refuses a name that is
+  # already taken, so two builds in the same second at the same commit cannot
+  # replace one another, or the build a pointer names. The dotfile is unique
+  # per run because the link shares its inode: a shared one would let a second
+  # run's cp rewrite the zip the first had just published. mktemp makes it
+  # 0600, and Caddy has to read it.
+  local part
+  part=$(mktemp "$dest/.$name.XXXXXX")
+  cp "$stage/out.zip" "$part"
+  chmod 0644 "$part"
+  if ! ln "$part" "$dest/$name" 2>/dev/null; then
+    rm -f "$part"
     die "$name is already kept; build again in a second"
   fi
-  rm -f "$dest/.$name"
+  rm -f "$part"
 
   point "$dest" beta "$name"
   prune "$dest" "$ext-$target"
