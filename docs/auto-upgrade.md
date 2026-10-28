@@ -112,6 +112,38 @@ reports `no_record`.
 The toggle exists because sops-nix fails the build when a declared secret is missing from
 `secrets/nixos.yaml`. With the toggle off, nothing is declared and reports stay local.
 
+## What leaves the box
+
+`paulgsc/dotfiles` is public, so anything this workflow sends to GitHub can be read by
+anyone. These are the claims. Each names the check in
+`nixos/auto-upgrade/test-filter.sh` (run by CI) that fails if the code stops matching
+it. The same list heads `report.sh`.
+
+| | Claim | Check |
+|---|---|---|
+| C1 | Journal text reaches GitHub only after `scrub()`. It runs once, right after the journal is read, and the findings, near misses and failure tail are all cut from its output. | `scrub-once`: the scrub line comes before the first cut, and nothing reads the unscrubbed text after it |
+| C2 | `scrub()` replaces the exact value of every secret in `/run/secrets` (8+ characters) with `[REDACTED:<name>]`. It also redacts common credential shapes: `github_pat_…`/`ghp_…`, `Bearer …`, `password=`/`token: …`, `user:pass@` in URLs, private-key blocks. Every other line is left byte for byte. | `scrub` cases: each shape is redacted; store paths, nar hashes, the canary and sops errors that name a secret are left alone |
+| C3 | GitHub receives only these calls: list open `upgrade-log` issues; open one (title + scrubbed report); comment on and close a stale one (fixed text); create the label; record a Deployment and its status. Only the issue body carries journal text. Everything else is fixed text, counts, yes/no, commit ids, `/nix/store` paths and the issue's URL. | `egress`: the set of `api` calls in `report.sh` must equal this list |
+| C4 | The GitHub token reaches `curl` through a file descriptor (`-H @<(…)`), never as an argument, which any process could read in `/proc` while the call runs. | `token`: the token file is used nowhere else |
+
+Each check was confirmed to fail when its claim is broken on purpose: scrub moved after
+the cut, a secret or the URL rule removed, a new API call, the token back on the command
+line.
+
+**Not claimed.** `scrub()` can't recognise a credential that isn't in `/run/secrets` and
+doesn't match a known shape. A bare random string printed by some tool would pass through.
+The defence is that the published text comes from the upgrade units' own output (nix,
+activation, home-manager), not from arbitrary programs.
+
+**Already public, and repeated here:** the hostname (`nixos`), the user (`paulg`),
+`/nix/store` paths (derived from this repo), and the git name and email in
+`home-manager/shell/git`.
+
+**Elsewhere:**
+- The weekly lockfile PR carries package names and versions.
+- The `slo` issue and the watcher's run summary carry only Deployment data.
+- Grafana, Prometheus, `history.jsonl` and `latest.md` stay on the box and the LAN.
+
 ## One-time repo setting
 
 Settings → Actions → General → Workflow permissions → tick **"Allow GitHub Actions to

@@ -23,6 +23,21 @@
 #
 # Env (set by the unit): REPO, TOKEN_FILE, STATE_DIR, METRICS_DIR, HM_USER,
 # HM_HOME, HM_CONFIG.
+#
+# What leaves the box (REPO is public: anything sent to GitHub is world-
+# readable).  Each claim names the check in test-filter.sh that would fail
+# if it stopped being true; docs/auto-upgrade.md, "What leaves the box".
+#   C1  Journal text reaches GitHub only after scrub(): $log is scrubbed once,
+#       right after it is read, and the findings, near misses and failure
+#       tail are all cut from it.                         [check: scrub-once]
+#   C2  scrub() removes the exact value of every secret in /run/secrets
+#       (8+ characters) and common credential shapes, and leaves other
+#       lines byte for byte.                              [check: scrub cases]
+#   C3  GitHub receives these calls and no others.  Only the issue body
+#       carries journal text; the rest is fixed text, counts, yes/no,
+#       commit ids, store paths and the issue's URL.      [check: egress]
+#   C4  The token is passed to curl through a file descriptor, never as
+#       an argument (readable in /proc while the call runs). [check: token]
 
 units=(nixos-upgrade home-manager-upgrade)
 current_system=${CURRENT_SYSTEM:-/run/current-system} # overridable for tests
@@ -72,6 +87,10 @@ for u in "${units[@]}"; do
     result[$u]=skipped
   fi
 done
+
+# Everything below is derived from $log, and some of it is published to a
+# public repo, so credentials come out here, once (filter.sh, scrub).
+log=$(scrub <<<"$log")
 
 curated=$(printf '%s\n' "$log" | curate)
 findings=$(printf '%s\n' "$curated" | grep -v 'upgrade-canary ' || true)
@@ -296,8 +315,11 @@ if [ ! -r "$TOKEN_FILE" ]; then
   exit 0
 fi
 
+# The token goes to curl through a file descriptor (`-H @file`), never as an
+# argument: arguments are readable in /proc by any process on the box while
+# the call runs.  printf is a builtin, so it never appears in argv either.
 api() {
-  curl -fsS -H "Authorization: Bearer $(cat "$TOKEN_FILE")" \
+  curl -fsS -H @<(printf 'Authorization: Bearer %s\n' "$(<"$TOKEN_FILE")") \
     -H "Accept: application/vnd.github+json" \
     -H "X-GitHub-Api-Version: 2022-11-28" \
     "$@"
