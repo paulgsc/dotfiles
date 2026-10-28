@@ -140,9 +140,16 @@ cmd_build() {
     --arg branch "$branch" --arg built "$stamp" --argjson dirty "$([ -n "$dirty" ] && echo true || echo false)" \
     '{$ext, $target, $commit, $branch, $dirty, $built}' >"$stage/ext/ext-drop.json"
   (cd "$stage/ext" && zip -qrX "$stage/out.zip" .)
-  # Into a dotfile first, then renamed: the listing never offers a half-written zip.
+  # Into a dotfile first, then linked into place: the listing never offers a
+  # half-written zip, and ln (unlike mv) refuses a name that is already taken,
+  # so two builds in the same second at the same commit cannot replace one
+  # another, or the build a pointer names.
   cp "$stage/out.zip" "$dest/.$name"
-  mv -f "$dest/.$name" "$dest/$name"
+  if ! ln "$dest/.$name" "$dest/$name" 2>/dev/null; then
+    rm -f "$dest/.$name"
+    die "$name is already kept; build again in a second"
+  fi
+  rm -f "$dest/.$name"
 
   point "$dest" beta "$name"
   prune "$dest" "$ext-$target"
