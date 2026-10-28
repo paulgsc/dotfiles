@@ -43,6 +43,12 @@ jobs:
             exit 1
           fi
 
+      # The upgrade report's filter against labelled real log lines: it must
+      # keep every warning/error format and drop the build noise.  Runs
+      # before nix, like the guardrail above.  nixos/auto-upgrade/filter.sh.
+      - name: upgrade-report filter recall
+        run: bash nixos/auto-upgrade/test-filter.sh
+
       - uses: DeterminateSystems/nix-installer-action@v14
 
       # Transparent binary cache — avoids rebuilding what nixpkgs already provides

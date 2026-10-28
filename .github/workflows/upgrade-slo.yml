@@ -1,0 +1,37 @@
+name: Upgrade SLO
+
+# The nightly upgrade judged from off the box: a box that is off, a dead
+# timer or a broken reporter can't report itself.  Reads the Deployments
+# nixos/auto-upgrade/report.sh records, and keeps one `slo` issue open while
+# anything fails.  The checks: .github/scripts/upgrade-slo.sh.
+#
+# If this workflow itself fails, GitHub emails you as for any failed
+# scheduled run.  GitHub also disables scheduled workflows after 60 days
+# without repository activity; the weekly lockfile PR keeps it active.
+
+on:
+  schedule:
+    # Daily, after the box's 04:40 America/Los_Angeles run (11:40–13:00 UTC
+    # depending on DST, plus up to 2h of build).
+    - cron: "17 17 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: read
+  issues: write
+  actions: read
+
+jobs:
+  watch:
+    name: nightly upgrade SLO
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v14
+      - uses: DeterminateSystems/magic-nix-cache-action@v8
+      - name: judge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: .github/scripts/upgrade-slo.sh
