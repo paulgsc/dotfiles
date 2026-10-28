@@ -68,6 +68,17 @@ write_pointers() {
   mv -f "$dest/.pointers.txt" "$dest/pointers.txt"
 }
 
+# One lock per extension and target, held by a build from publishing its zip
+# until its pointers are written, and by promote from its checks until its
+# pointer is written. So a prune never runs between a promote's check and its
+# pointer (which could delete the build stable is about to name), and two
+# builds never publish at once. It lives outside drop_root, so the listing
+# never shows it; the lock goes when the process exits.
+lock() {
+  exec 9>"${XDG_RUNTIME_DIR:-/tmp}/ext-drop-$1-$2.lock"
+  flock 9
+}
+
 point() {
   local dest=$1 name=$2 target=$3
   ln -sfn "$target" "$dest/.$name.zip"
@@ -147,6 +158,7 @@ cmd_build() {
   # per run because the link shares its inode: a shared one would let a second
   # run's cp rewrite the zip the first had just published. mktemp makes it
   # 0600, and Caddy has to read it.
+  lock "$ext" "$target"
   local part
   part=$(mktemp "$dest/.$name.XXXXXX")
   cp "$stage/out.zip" "$part"
@@ -178,6 +190,7 @@ cmd_promote() {
   check_name "$target"
   dest=$drop_root/$ext/$target
   [ -d "$dest" ] || die "nothing dropped for $ext/$target yet"
+  lock "$ext" "$target"
   if [ -z "$build" ]; then
     build=$(readlink "$dest/beta.zip" 2>/dev/null) || die "$ext/$target has no beta to promote"
   fi

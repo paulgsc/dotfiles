@@ -10,7 +10,7 @@
   # pnpm command in the checkout.
   ext-drop = pkgs.writeShellApplication {
     name = "ext-drop";
-    runtimeInputs = with pkgs; [coreutils findutils git jq zip];
+    runtimeInputs = with pkgs; [coreutils findutils git jq util-linux zip];
     text = builtins.readFile ./ext-drop.sh;
   };
 in {
