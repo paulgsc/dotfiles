@@ -233,6 +233,15 @@
           enable = true;
           proxyPass = "http://127.0.0.1:5540";
         };
+        # Extension builds that `ext-drop` (home-manager/shell/ext-drop) keeps,
+        # downloaded by the Windows browser.  Windows pulls; the box never
+        # writes to it (no /mnt/c, no scp into WSL).  Read-only, no login:
+        # anyone on the LAN can download these zips.  docs/ext-drop.md.
+        "builds" = {
+          enable = true;
+          root = "/srv/builds";
+          browse = true;
+        };
       };
     };
   };
@@ -253,9 +262,15 @@
     ];
   };
 
-  # Workaround for GNOME autologin: https://github.com/NixOS/nixpkgs/issues/103746#issuecomment-945091229
-  systemd.services."getty@tty1".enable = false;
-  systemd.services."autovt@tty1".enable = false;
+  systemd = {
+    # Workaround for GNOME autologin: https://github.com/NixOS/nixpkgs/issues/103746#issuecomment-945091229
+    services."getty@tty1".enable = false;
+    services."autovt@tty1".enable = false;
+
+    # ext-drop's builds, served by the "builds" host above: paulg writes them,
+    # and 0755 lets Caddy read them.
+    tmpfiles.rules = ["d /srv/builds 0755 paulg users -"];
+  };
 
   # Install firefox.
   programs.firefox.enable = true;

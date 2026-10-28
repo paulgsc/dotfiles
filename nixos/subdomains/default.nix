@@ -54,7 +54,7 @@ with lib; let
           # If a root path is set, tell Caddy where files live and enable the file server.
           ${optionalString (hostCfg.root != null) ''
             root * ${hostCfg.root}
-            file_server
+            file_server${optionalString hostCfg.browse " browse"}
           ''}
 
           # Allow the user to inject custom Caddyfile snippets (like headers or matchers).
@@ -140,6 +140,12 @@ in {
             type = types.nullOr types.path;
             default = null;
             description = "Path to static files if not proxying.";
+          };
+
+          browse = mkOption {
+            type = types.bool;
+            default = false;
+            description = "With root set, list a directory's files when it has no index.html.";
           };
 
           extraConfig = mkOption {

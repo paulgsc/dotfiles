@@ -18,6 +18,7 @@
     ./shell/clipboard
     ./shell/docker
     ./shell/headed-test
+    ./shell/ext-drop
   ];
 
   home = {
