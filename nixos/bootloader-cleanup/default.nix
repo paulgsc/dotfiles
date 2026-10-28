@@ -54,8 +54,9 @@
       User = "root";
     };
 
+    # coreutils only: a service's default PATH has no awk.
     script = ''
-      BOOT_USAGE=$(df /boot | tail -1 | awk '{print $5}' | sed 's/%//')
+      BOOT_USAGE=$(df --output=pcent /boot | tail -1 | tr -dc '0-9')
       echo "Boot partition usage: $BOOT_USAGE%"
 
       if [ "$BOOT_USAGE" -gt 85 ]; then
@@ -157,8 +158,10 @@
       # RETENTION POLICY: 30 days (matches nix.gc.options and hm-garbage-collector)
       ${pkgs.nix}/bin/nix-collect-garbage --delete-older-than 30d || true
 
-      # Check boot space and warn if needed
-      BOOT_USAGE=$(df /boot | tail -1 | awk '{print $5}' | sed 's/%//')
+      # Check boot space and warn if needed.  coreutils only: activation
+      # scripts run with a minimal PATH (coreutils, grep, findutils, ...) that
+      # has no sed or awk, and a missing command here fails the whole switch.
+      BOOT_USAGE=$(df --output=pcent /boot | tail -1 | tr -dc '0-9')
       if [ "$BOOT_USAGE" -gt 80 ]; then
         echo "WARNING: Boot partition is $BOOT_USAGE% full"
         echo "Consider running: sudo nix-collect-garbage --delete-older-than 3d"

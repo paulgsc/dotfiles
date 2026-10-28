@@ -37,3 +37,9 @@ drop	Activating writeBoundary
 drop	home-manager: building github:paulgsc/dotfiles/840369c82b763c72e5b6731dffd34ba37c7e22e4
 # the reporter's own canary must pass through the same rule
 keep	warning: upgrade-canary 0123456789abcdef0123456789abcdef
+# from the first real run (#58): the root cause was only a near miss, and
+# the switch's own failure line wasn't caught at all
+keep	/nix/store/i92n32lc6l0h2kh947c97hyswdr983fh-nixos-system-nixos-26.05.20260814.02e0898/activate: line 130: sed: command not found
+keep	Command 'systemd-run -E LOCALE_ARCHIVE -E NIXOS_INSTALL_BOOTLOADER -E NIXOS_NO_CHECK --collect --no-ask-password --pipe --quiet --service-type=exec --unit=nixos-rebuild-switch-to-configuration /nix/store/i92n32lc6l0h2kh947c97hyswdr983fh-nixos-system-nixos-26.05.20260814.02e0898/bin/switch-to-configuration switch' returned non-zero exit status 2.
+drop	nixos-upgrade.service: Triggering OnFailure= dependencies.
+drop	home-manager-upgrade.service: Triggering OnSuccess= dependencies.
