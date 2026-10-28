@@ -1,0 +1,39 @@
+# Labelled journal lines for filter.sh: `keep<TAB>line` or `drop<TAB>line`.
+# CI (test-filter.sh) fails if curate() drops a keep or keeps a drop.
+# When a real run shows a line the filter got wrong, add it here with the fix.
+#
+# nix / nixos-rebuild
+keep	evaluation warning: networking.managedPorts: autoRetire.enable is set but retirement is NOT enforced at build time. Use /etc/port-audit.txt for manual review.
+keep	trace: warning: The option `services.foo' defined in `/nix/store/abc-source/nixos/configuration.nix' has been renamed to `services.bar'.
+keep	warning: Git tree '/home/paulg/dotfiles' is dirty
+keep	error: builder for '/nix/store/abcdabcdabcdabcdabcdabcdabcdabcd-foo-1.0.drv' failed with exit code 1;
+keep	error: 1 dependencies of derivation '/nix/store/abcdabcdabcdabcdabcdabcdabcdabcd-nixos-system-nixos-26.05.drv' failed to build
+keep	error: unable to download 'https://github.com/paulgsc/dotfiles/archive/main.tar.gz': HTTP error 503
+drop	building the system configuration...
+drop	building '/nix/store/abcdabcdabcdabcdabcdabcdabcdabcd-libgpg-error-1.50.drv'...
+drop	copying path '/nix/store/abcdabcdabcdabcdabcdabcdabcdabcd-libgpg-error-1.50' from 'https://cache.nixos.org'...
+drop	these 12 derivations will be built:
+drop	these 40 paths will be fetched (120.5 MiB download, 500.1 MiB unpacked):
+# switch-to-configuration and activation scripts
+keep	warning: the following units failed: docker.service
+keep	WARNING: Boot partition is 83% full
+keep	nixos-upgrade.service: Failed with result 'exit-code'.
+drop	activating the configuration...
+drop	setting up /etc...
+drop	reloading user units for paulg...
+drop	restarting sysinit-reactivation.target
+drop	the following new units were started: nix-gc.service
+drop	Running post-rebuild cleanup...
+drop	Finished NixOS Upgrade.
+# home-manager (warnEcho/errorEcho: no prefix)
+keep	Existing file '/home/paulg/.bashrc' is in the way of '/nix/store/abcdabcdabcdabcdabcdabcdabcdabcd-home-manager-files/.bashrc', will be moved to '/home/paulg/.bashrc.backup'
+keep	Existing file '/home/paulg/.bashrc' would be clobbered
+keep	Please do one of the following:
+keep	Oops, Nix failed to install your new Home Manager profile!
+keep	Path '/home/paulg/.config/foo' does not link into a Home Manager generation. Skipping delete.
+drop	Starting Home Manager activation
+drop	Activating checkFilesChanged
+drop	Activating writeBoundary
+drop	home-manager: building github:paulgsc/dotfiles/840369c82b763c72e5b6731dffd34ba37c7e22e4
+# the reporter's own canary must pass through the same rule
+keep	warning: upgrade-canary 0123456789abcdef0123456789abcdef

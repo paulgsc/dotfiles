@@ -8,9 +8,11 @@
 # feature branch still works, but lasts only until the next run puts `main`
 # back.
 #
-# Each run's warnings and errors are curated by ./report.sh into
-# /var/lib/upgrade-report/latest.md and, with `reportToGitHub`, into an
-# `upgrade-log` issue on the repo.
+# After each run ./report.sh judges it (both halves really on `main`, the
+# capture really working) and records the verdict three ways: Prometheus
+# metrics for Grafana, a GitHub Deployment for the off-box SLO watcher
+# (.github/workflows/upgrade-slo.yml), and an `upgrade-log` issue for the
+# warnings and errors.  docs/auto-upgrade.md.
 {
   config,
   lib,
@@ -22,8 +24,9 @@
   flakeRef = "github:${repo}";
   user = "paulg";
 
-  # File reports as GitHub issues, with `github-issues-token` from
-  # secrets/nixos.yaml (fine-grained, Issues: read/write on this repo only).
+  # Record runs on GitHub (Deployments) and file reports as issues, with
+  # `github-issues-token` from secrets/nixos.yaml (fine-grained, this repo
+  # only: Issues and Deployments, read/write).
   # A declared secret the file doesn't hold fails the build, so on a machine
   # without one set this false; the report still lands in latest.md.
   # docs/auto-upgrade.md.
@@ -41,9 +44,17 @@
       gnused
       hostname
       jq
+      config.nix.package
     ];
-    text = builtins.readFile ./report.sh;
+    text = builtins.readFile ./filter.sh + builtins.readFile ./report.sh;
   };
+
+  # Each upgrade unit's first journal line.  report.sh must find it again
+  # through the same journal read and filter as everything else; if it can't,
+  # the capture is broken and the run isn't good, however quiet it looked.
+  canary = ''
+    echo "warning: upgrade-canary $INVOCATION_ID"
+  '';
 in {
   system.autoUpgrade = {
     enable = true;
@@ -77,6 +88,11 @@ in {
     nixos-upgrade = {
       onSuccess = ["home-manager-upgrade.service"];
       onFailure = ["upgrade-report.service"];
+      preStart = canary;
+      # A oneshot waits forever by default: a hung build would block every
+      # night after it and report nothing.  A timeout is a failure the report
+      # sees.
+      serviceConfig.TimeoutStartSec = "2h";
     };
 
     home-manager-upgrade = {
@@ -87,7 +103,9 @@ in {
       serviceConfig = {
         Type = "oneshot";
         User = user;
+        TimeoutStartSec = "1h";
       };
+      preStart = canary;
 
       environment = config.nix.envVars // config.networking.proxy.envVars;
       path = [
@@ -123,16 +141,25 @@ in {
     };
 
     upgrade-report = {
-      description = "Curate the nightly upgrade's warnings and errors";
+      description = "Judge and record the nightly upgrade";
       restartIfChanged = false;
       serviceConfig = {
         Type = "oneshot";
         ExecStart = lib.getExe report;
         StateDirectory = "upgrade-report";
+        TimeoutStartSec = "15min";
       };
       environment = {
         REPO = repo;
         STATE_DIR = "/var/lib/upgrade-report";
+        # Read by node_exporter's textfile collector (paulgsc/server,
+        # infra/compose/monitoring.yml), which sees the host's / at /host.
+        METRICS_DIR = "/var/lib/upgrade-report/metrics";
+        HM_USER = user;
+        HM_HOME = config.users.users.${user}.home;
+        HM_CONFIG = "${user}@nixos";
+        # For the `nix eval` of the expected home profile.
+        HOME = "/root";
         TOKEN_FILE =
           if reportToGitHub
           then config.sops.secrets.github-issues-token.path
