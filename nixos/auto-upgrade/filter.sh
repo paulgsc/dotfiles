@@ -40,3 +40,29 @@ near_misses() {
     awk 'NR == FNR { if ($0 != "") kept[$0] = 1; next } !($0 in kept) && !seen[$0]++' \
       <(printf '%s\n' "$1") - || true
 }
+
+# Remove credentials from journal text before it is published anywhere: the
+# repo is public, so an issue body is world-readable.  Two layers:
+#   - the literal value of every secret this machine actually holds
+#     (sops-nix's /run/secrets), which is exact for the secrets that exist;
+#   - common credential shapes, for ones that don't come from there: GitHub
+#     tokens, `Bearer …`, `password=`/`token: …` pairs, user:pass@ in URLs,
+#     private-key blocks.
+# Values shorter than 8 characters are skipped: replacing them would mangle
+# unrelated text and they are not credentials worth hiding.
+scrub() {
+  local text f v
+  text=$(cat)
+  for f in "${SECRETS_DIR:-/run/secrets}"/*; do
+    [ -f "$f" ] && [ -r "$f" ] || continue
+    v=$(<"$f")
+    [ "${#v}" -ge 8 ] || continue
+    text=${text//"$v"/[REDACTED:${f##*/}]}
+  done
+  printf '%s\n' "$text" | sed -E \
+    -e 's/(github_pat_|gh[pousr]_)[A-Za-z0-9_]{16,}/\1[REDACTED]/g' \
+    -e 's/(Bearer|Basic|token)[[:space:]]+[A-Za-z0-9._~+/=-]{20,}/\1 [REDACTED]/Ig' \
+    -e "s/((password|passwd|secret|token|api[_-]?key|access[_-]?key)[A-Za-z_-]*[\"']?[[:space:]]*[:=][[:space:]]*[\"']?)[^[:space:]\"',;]{6,}/\\1[REDACTED]/Ig" \
+    -e 's#(://)[^/@[:space:]]+:[^/@[:space:]]+@#\1[REDACTED]@#g' \
+    -e '/-----BEGIN [A-Z ]*PRIVATE KEY-----/,/-----END [A-Z ]*PRIVATE KEY-----/c\[REDACTED PRIVATE KEY]'
+}
