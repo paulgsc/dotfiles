@@ -135,10 +135,15 @@ if [ "$good" = 1 ] && [ "$n_findings" = 0 ]; then
   fingerprint=none
 else
   # Store paths and numbers (percentages, sizes, counts) change run to run
-  # without the finding changing; leave them out of the fingerprint.
-  fingerprint=$(printf '%s\n' "$findings" "${result[*]}" "$system_ok $home_ok $capture_ok" |
-    sed -E 's,/nix/store/[a-z0-9]{32}-,/nix/store/…-,g; s/[0-9]+/N/g' |
-    sort -u | sha256sum | cut -c1-16)
+  # without the finding changing; leave them out of the lines.  The verdict
+  # is hashed as is: normalised, "1 0 1" and "1 1 1" would collide and an
+  # open warnings issue would swallow a verification failure.
+  fingerprint=$({
+    printf '%s\n' "$findings" |
+      sed -E 's,/nix/store/[a-z0-9]{32}-,/nix/store/…-,g; s/[0-9]+/N/g' | sort -u
+    echo "units: ${result[*]}"
+    echo "checks: system_ok=$system_ok home_ok=$home_ok capture_ok=$capture_ok"
+  } | sha256sum | cut -c1-16)
 fi
 
 {
