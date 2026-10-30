@@ -273,7 +273,18 @@
   };
 
   # Install firefox.
-  programs.firefox.enable = true;
+  programs.firefox = {
+    enable = true;
+    # uBlock Origin as a policy-installed extension, default settings, rather
+    # than a hand install that lives only in the profile.  Firefox re-checks
+    # it on every launch and reinstalls it if it is missing or broken, so a
+    # switch that moves Firefox's version can't leave it half-working.
+    # `force_installed` also means it can't be removed from about:addons.
+    policies.ExtensionSettings."uBlock0@raymondhill.net" = {
+      installation_mode = "force_installed";
+      install_url = "https://addons.mozilla.org/firefox/downloads/latest/ublock-origin/latest.xpi";
+    };
+  };
 
   # Allow unfree packages
   nixpkgs.config.allowUnfree = true;
