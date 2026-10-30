@@ -273,7 +273,29 @@
   };
 
   # Install firefox.
-  programs.firefox.enable = true;
+  programs.firefox = {
+    enable = true;
+    # ESR: a new major version about once a year instead of every four
+    # weeks, with security fixes in between.  Every major version a switch
+    # brings in rewrites the profile's storage, and one that goes backwards
+    # (an older lockfile, a rollback) can leave it unreadable — the wrapper
+    # sets MOZ_ALLOW_DOWNGRADE, so Firefox won't refuse.
+    #
+    # Named, not `firefox-esr`: on 26.05 that is still ESR 140, thirteen
+    # majors behind the 153 this profile was last opened with.  When 153
+    # leaves nixpkgs the eval fails, and the bump to the next ESR is made
+    # here, by hand, forwards.
+    package = pkgs.firefox-esr-153;
+    # uBlock Origin as a policy-installed extension, default settings, rather
+    # than a hand install that lives only in the profile.  Firefox re-checks
+    # it on every launch and reinstalls it if it is missing or broken, so a
+    # switch that moves Firefox's version can't leave it half-working.
+    # `force_installed` also means it can't be removed from about:addons.
+    policies.ExtensionSettings."uBlock0@raymondhill.net" = {
+      installation_mode = "force_installed";
+      install_url = "https://addons.mozilla.org/firefox/downloads/latest/ublock-origin/latest.xpi";
+    };
+  };
 
   # Allow unfree packages
   nixpkgs.config.allowUnfree = true;
