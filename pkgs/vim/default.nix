@@ -103,6 +103,11 @@
     " this generated vimrc string.
     source ${./.}/typst.vim
 
+    " --- Rust scratchpad: ALE + rust-analyzer + rustc/clippy, :make runs ---
+    " Only in a `scratch` dir under its dev shell; see pkgs/vim/scratch.vim
+    " and docs/rust-scratchpad.md.
+    source ${./.}/scratch.vim
+
     augroup slint_syntax
         autocmd!
         autocmd BufNewFile,BufRead *.slint setfiletype slint

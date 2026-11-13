@@ -69,6 +69,12 @@ _: let
         bind-key -r J resize-pane -D 5
         bind-key -r K resize-pane -U 5
         bind-key -r L resize-pane -R 5
+        # prefix S: Rust scratchpad (github:paulgsc/scratch).  A new window,
+        # vim on a fresh main.rs in tmpfs, and a pane beside it that compiles,
+        # lints and runs it on every save.  Quit vim or close the window and
+        # the directory is gone.  The toolchain exists only in that flake's
+        # dev shell.  See docs/rust-scratchpad.md.
+        bind S new-window -n scratch "nix develop github:paulgsc/scratch#scratchpad -c scratch || { echo 'scratch failed; Enter closes this window'; read -r _; }"
 
         # ────────────────────────────────
         # Optional Aesthetic Touches
