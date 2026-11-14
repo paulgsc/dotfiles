@@ -24,9 +24,13 @@
     sops-nix.inputs.nixpkgs.follows = "nixpkgs";
 
     # paulgsc/server, for its NixOS module only: home's on-demand deploy
-    # (nixos/home-deploy). Not `follows`: the module takes pkgs from this
-    # system, and server's own nixpkgs pins its devshell.
+    # (nixos/home-deploy). The module takes pkgs from this system, so
+    # server's nixpkgs inputs follow ours rather than download two more.
+    # Its devshell (`make envctl`) builds from the checkout's own lock, which
+    # this doesn't touch.
     server.url = "github:paulgsc/server";
+    server.inputs.nixpkgs.follows = "nixpkgs";
+    server.inputs.nixpkgs-sqlx.follows = "nixpkgs";
   };
 
   outputs = {
