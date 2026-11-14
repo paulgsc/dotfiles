@@ -28,9 +28,11 @@
     # server's nixpkgs inputs follow ours rather than download two more.
     # Its devshell (`make envctl`) builds from the checkout's own lock, which
     # this doesn't touch.
-    server.url = "github:paulgsc/server";
-    server.inputs.nixpkgs.follows = "nixpkgs";
-    server.inputs.nixpkgs-sqlx.follows = "nixpkgs";
+    server = {
+      url = "github:paulgsc/server";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs-sqlx.follows = "nixpkgs";
+    };
   };
 
   outputs = {
