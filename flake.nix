@@ -22,6 +22,11 @@
     # each machine's own SSH host key.  See nixos/secrets and docs/secrets.md.
     sops-nix.url = "github:Mic92/sops-nix";
     sops-nix.inputs.nixpkgs.follows = "nixpkgs";
+
+    # paulgsc/server, for its NixOS module only: home's on-demand deploy
+    # (nixos/home-deploy). Not `follows`: the module takes pkgs from this
+    # system, and server's own nixpkgs pins its devshell.
+    server.url = "github:paulgsc/server";
   };
 
   outputs = {

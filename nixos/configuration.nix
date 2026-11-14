@@ -21,6 +21,7 @@
     ./port-configuration
     ./subdomains
     ./secrets
+    ./home-deploy
   ];
 
   nixpkgs = {
